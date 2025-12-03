@@ -1,0 +1,177 @@
+/* If using Tailwind - add this after your Tailwind directives */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+
+/* Prevent text selection throughout the application */
+* {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Allow text selection in input fields and textareas */
+input, textarea, select, [contenteditable="true"] {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
+  user-select: text;
+}
+
+
+:root {
+  /* Light mode defaults */
+  --status-bg-start: #1c91dfff;
+  --status-bg-end: #2c69c5ff;
+  --status-border: rgba(255,255,255,0.2);
+  --status-shadow: 0 4px 15px rgba(0,0,0,0.1);
+  --status-text: white;
+  --status-heading: white;
+  --status-header-border: rgba(255,255,255,0.3);
+  --status-card-bg: rgba(255,255,255,0.15);
+  --status-card-border: rgba(255,255,255,0.1);
+  --status-card-heading: white;
+  --status-card-text: white;
+  --status-value: #ffffff;
+  --status-led-inset: rgba(255,255,255,0.4);
+  --status-led-inset-dark: rgba(0,0,0,0.3);
+
+  /* Control Panel Light Mode */
+  --control-panel-bg: #fafafa;
+  --control-panel-border: #ccc;
+  --control-panel-text: black;
+  --control-panel-heading: black;
+  --section-border: #ddd;
+  --text-muted: #666;
+  
+  /* Inputs */
+  --input-bg: white;
+  --input-text: black;
+  --input-border: 1px solid #ccc;
+  
+  /* Buttons */
+  --button-primary: #007bff;
+  --button-primary-active: #0056b3;
+  --button-success: #28a745;
+  --button-success-active: #1e7e34;
+  --button-warning: #ff6b35;
+  --button-warning-active: #c4450c;
+  --button-danger: #dc3545;
+  --button-danger-active: #a71e2d;
+  --button-secondary: #6c757d;
+  --button-info: #17a2b8;
+  
+  /* Sections */
+  --amr-bg: #f8fff9;
+  --amr-border: #28a745;
+  --amr-active-color: #28a745;
+  --zaxis-bg: #e7f3ff;
+  --zaxis-border: #007bff;
+  --zaxis-value-color: #007bff;
+  --zaxis-track: #007bff;
+  
+  /* Items */
+  --item-bg: #f8f9fa;
+  --item-border: #dee2e6;
+  --active-item-bg: #fff3cd;
+  --active-item-border: #ffeaa7;
+  
+  /* Colors */
+  --primary-color: #007bff;
+  --success-color: #28a745;
+  --danger-color: #dc3545;
+  --warning-text: #856404;
+  
+  /* Page */
+  --page-bg: white;
+  --mobile-header-bg: #f8f9fa;
+  --mobile-header-border: #dee2e6;
+}
+
+.dark {
+  /* Status Bar Dark Mode */
+  --status-bg-start: #1a1f2e;
+  --status-bg-end: #2d3748;
+  --status-border: rgba(255,255,255,0.1);
+  --status-shadow: 0 4px 15px rgba(0,0,0,0.3);
+  --status-text: #e2e8f0;
+  --status-heading: #f7fafc;
+  --status-header-border: rgba(255,255,255,0.15);
+  --status-card-bg: rgba(0,0,0,0.3);
+  --status-card-border: rgba(255,255,255,0.08);
+  --status-card-heading: #cbd5e0;
+  --status-card-text: #e2e8f0;
+  --status-value: #a0aec0;
+  --status-led-inset: rgba(255,255,255,0.2);
+  --status-led-inset-dark: rgba(0,0,0,0.4);
+
+  /* Control Panel Dark Mode */
+  --control-panel-bg: #1f2937;
+  --control-panel-border: #4b5563;
+  --control-panel-text: #e5e7eb;
+  --control-panel-heading: #f9fafb;
+  --section-border: #374151;
+  --text-muted: #9ca3af;
+  
+  /* Inputs */
+  --input-bg: #374151;
+  --input-text: #e5e7eb;
+  --input-border: 1px solid #4b5563;
+  
+  /* Buttons */
+  --button-primary: #3b82f6;
+  --button-primary-active: #1d4ed8;
+  --button-success: #10b981;
+  --button-success-active: #047857;
+  --button-warning: #f59e0b;
+  --button-warning-active: #d97706;
+  --button-danger: #ef4444;
+  --button-danger-active: #dc2626;
+  --button-secondary: #6b7280;
+  --button-info: #06b6d4;
+  
+  /* Sections */
+  --amr-bg: #064e3b;
+  --amr-border: #10b981;
+  --amr-active-color: #10b981;
+  --zaxis-bg: #1e3a8a;
+  --zaxis-border: #3b82f6;
+  --zaxis-value-color: #60a5fa;
+  --zaxis-track: #3b82f6;
+  
+  /* Items */
+  --item-bg: #374151;
+  --item-border: #4b5563;
+  --active-item-bg: #78350f;
+  --active-item-border: #d97706;
+  
+  /* Colors */
+  --primary-color: #60a5fa;
+  --success-color: #10b981;
+  --danger-color: #ef4444;
+  --warning-text: #fbbf24;
+  
+  /* Page */
+  --page-bg: #111827;
+  --mobile-header-bg: #374151;
+  --mobile-header-border: #4b5563;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes pulseGreen {
+  0%, 100% { 
+    box-shadow: 0 0 12px rgba(74, 222, 128, 0.7), inset 0 1px 2px var(--status-led-inset, rgba(255,255,255,0.4));
+  }
+  50% { 
+    box-shadow: 0 0 16px rgba(74, 222, 128, 0.9), inset 0 1px 2px var(--status-led-inset, rgba(255,255,255,0.4));
+  }
+}

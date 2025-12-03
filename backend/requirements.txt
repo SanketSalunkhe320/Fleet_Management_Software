@@ -1,0 +1,6 @@
+flask
+flask-cors
+opencv-python
+rospy
+std_msgs
+geometry_msgs
