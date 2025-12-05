@@ -2822,7 +2822,7 @@ export default function RealTime() {
         
         ctx.fillStyle = '#28a745';
         ctx.beginPath();
-        ctx.arc(canvasX, canvasY, Math.max(4, 8 / zoomState.scale), 0, 2 * Math.PI);
+        ctx.arc(canvasX, canvasY, Math.max(2, 4 / zoomState.scale), 0, 2 * Math.PI);
         ctx.fill();
         
         // Reset shadow

@@ -57,12 +57,12 @@ export default function HealthCheck() {
   }, []);
 
   const metrics = [
-    { name: "Robot", value: robotStatus, icon: <FaBatteryFull className="text-xl text-blue-500" /> },
+    { name: "AMR", value: robotStatus, icon: <FaBatteryFull className="text-xl text-blue-500" /> },
     { name: "IMU", value: imuStatus, icon: <FaThermometerHalf className="text-xl text-green-500" /> },
     { name: "LIDAR", value: lidarStatus, icon: <FaSatelliteDish className="text-xl text-orange-500" /> },
-    { name: "Camera", value: cameraStatus, icon: <FaCamera className="text-xl text-purple-500" /> },
+    { name: "Depth Camera", value: cameraStatus, icon: <FaCamera className="text-xl text-purple-500" /> },
     { name: "Motor Drive", value: motorStatus, icon: <FaCogs className="text-xl text-indigo-500" /> },
-    { name: "Position", value: robotPosition, icon: <FaMapMarkerAlt className="text-xl text-red-500" /> },
+    // { name: "Position", value: robotPosition, icon: <FaMapMarkerAlt className="text-xl text-red-500" /> },
   ];
 
   const getStatusColor = (status) => {
@@ -82,6 +82,9 @@ export default function HealthCheck() {
     return "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200";
   };
 
+
+
+  
   return (
     <div className="text-slate-900 dark:text-slate-100 select-none">
       <h2 className="text-xl font-semibold mb-4">Health Check</h2>
