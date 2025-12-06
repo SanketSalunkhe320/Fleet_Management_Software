@@ -486,7 +486,6 @@
 #     app.run(debug=True, host='0.0.0.0', port=5000)
 
 
-
 from flask import Flask, request, jsonify
 import sqlite3
 import json
@@ -540,70 +539,60 @@ def get_db_connection(map_name):
         raise
 
 def init_database_for_map(map_name):
-    """Initialize database for a specific map"""
+    """Initialize database for a specific map with simplified schema"""
     try:
         conn = get_db_connection(map_name)
         
-        # Create separate tables for each node type
+        # Create simplified tables with only essential columns
         tables = {
             'stations': '''
                 CREATE TABLE IF NOT EXISTS stations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     map_name TEXT NOT NULL,
-                    name TEXT NOT NULL,
+                    node_type TEXT NOT NULL DEFAULT 'station',
                     x REAL NOT NULL,
                     y REAL NOT NULL,
-                    label TEXT,
-                    node_type TEXT NOT NULL DEFAULT 'station',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    z REAL DEFAULT 0.0
                 )
             ''',
             'docking_points': '''
                 CREATE TABLE IF NOT EXISTS docking_points (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     map_name TEXT NOT NULL,
-                    name TEXT NOT NULL,
+                    node_type TEXT NOT NULL DEFAULT 'docking',
                     x REAL NOT NULL,
                     y REAL NOT NULL,
-                    label TEXT,
-                    node_type TEXT NOT NULL DEFAULT 'docking',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    z REAL DEFAULT 0.0
                 )
             ''',
             'waypoints': '''
                 CREATE TABLE IF NOT EXISTS waypoints (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     map_name TEXT NOT NULL,
-                    name TEXT NOT NULL,
+                    node_type TEXT NOT NULL DEFAULT 'waypoint',
                     x REAL NOT NULL,
                     y REAL NOT NULL,
-                    label TEXT,
-                    node_type TEXT NOT NULL DEFAULT 'waypoint',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    z REAL DEFAULT 0.0
                 )
             ''',
             'home_positions': '''
                 CREATE TABLE IF NOT EXISTS home_positions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     map_name TEXT NOT NULL,
-                    name TEXT NOT NULL,
+                    node_type TEXT NOT NULL DEFAULT 'home',
                     x REAL NOT NULL,
                     y REAL NOT NULL,
-                    label TEXT,
-                    node_type TEXT NOT NULL DEFAULT 'home',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    z REAL DEFAULT 0.0
                 )
             ''',
             'charging_stations': '''
                 CREATE TABLE IF NOT EXISTS charging_stations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     map_name TEXT NOT NULL,
-                    name TEXT NOT NULL,
+                    node_type TEXT NOT NULL DEFAULT 'charging',
                     x REAL NOT NULL,
                     y REAL NOT NULL,
-                    label TEXT,
-                    node_type TEXT NOT NULL DEFAULT 'charging',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    z REAL DEFAULT 0.0
                 )
             ''',
             'arrows': '''
@@ -611,8 +600,7 @@ def init_database_for_map(map_name):
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     map_name TEXT NOT NULL,
                     from_node_id TEXT NOT NULL,
-                    to_node_id TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    to_node_id TEXT NOT NULL
                 )
             ''',
             'zones': '''
@@ -620,8 +608,8 @@ def init_database_for_map(map_name):
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     map_name TEXT NOT NULL,
                     name TEXT NOT NULL,
-                    points_json TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    zone_type TEXT DEFAULT 'normal',
+                    points_json TEXT NOT NULL
                 )
             '''
         }
@@ -653,7 +641,7 @@ def index():
             'list_maps': 'GET /list-maps'
         },
         'version': '1.0.0',
-        'note': 'Each map has its own database file'
+        'note': 'Each map has its own database file. Simplified schema: map_name, node_type, x, y, z'
     })
 
 @app.route('/health')
@@ -722,7 +710,7 @@ def save_nodes():
             result = conn.execute(f'DELETE FROM {table} WHERE map_name = ?', (map_name,))
             logger.info(f"🧹 Cleared {result.rowcount} records from {table}")
         
-        # Save nodes to respective tables
+        # Save nodes to respective tables - SIMPLIFIED: only map_name, node_type, x, y, z
         for node in nodes:
             table_name = None
             if node.get('type') == 'station':
@@ -743,9 +731,8 @@ def save_nodes():
             
             if table_name:
                 conn.execute(
-                    f'INSERT INTO {table_name} (map_name, name, x, y, label, node_type) VALUES (?, ?, ?, ?, ?, ?)',
-                    (map_name, node.get('label', ''), node.get('rosX', 0), node.get('rosY', 0), 
-                     node.get('label', ''), node.get('type', ''))
+                    f'INSERT INTO {table_name} (map_name, node_type, x, y, z) VALUES (?, ?, ?, ?, ?)',
+                    (map_name, node.get('type', ''), node.get('rosX', 0), node.get('rosY', 0), 0.0)
                 )
         
         # Save arrows
@@ -756,11 +743,12 @@ def save_nodes():
             )
             saved_counts['arrows'] += 1
         
-        # Save zones
+        # Save zones with zone_type
         for zone in zones:
+            zone_type = zone.get('type', 'normal')
             conn.execute(
-                'INSERT INTO zones (map_name, name, points_json) VALUES (?, ?, ?)',
-                (map_name, zone.get('name', ''), json.dumps(zone.get('points', [])))
+                'INSERT INTO zones (map_name, name, zone_type, points_json) VALUES (?, ?, ?, ?)',
+                (map_name, zone.get('name', ''), zone_type, json.dumps(zone.get('points', [])))
             )
             saved_counts['zones'] += 1
         
@@ -820,52 +808,60 @@ def load_nodes():
         }
         
         for table_name, node_type in node_tables.items():
-            rows = conn.execute(
+            cursor = conn.execute(
                 f'SELECT * FROM {table_name} WHERE map_name = ?', (map_name,)
-            ).fetchall()
+            )
+            rows = cursor.fetchall()
             
             for row in rows:
+                # Convert sqlite3.Row to dict before accessing
+                row_dict = dict(row)
+                label = f"{node_type}_{row_dict['id']}"
                 nodes.append({
-                    'id': f"node_{row['id']}",
+                    'id': f"node_{row_dict['id']}",
                     'type': node_type,
-                    'name': row['name'],
-                    'x': row['x'],
-                    'y': row['y'],
-                    'label': row['label'],
-                    'rosX': row['x'],  # For compatibility with frontend
-                    'rosY': row['y'],  # For compatibility with frontend
-                    'dbId': row['id']  # Keep original database ID
+                    'label': label,
+                    'x': row_dict['x'],
+                    'y': row_dict['y'],
+                    'rosX': row_dict['x'],  # For compatibility with frontend
+                    'rosY': row_dict['y'],  # For compatibility with frontend
+                    'dbId': row_dict['id']  # Keep original database ID
                 })
         
         # Load arrows
         arrows = []
-        arrow_rows = conn.execute(
+        cursor = conn.execute(
             'SELECT * FROM arrows WHERE map_name = ?', (map_name,)
-        ).fetchall()
+        )
+        arrow_rows = cursor.fetchall()
         
         for row in arrow_rows:
+            row_dict = dict(row)
             arrows.append({
-                'id': row['id'],
-                'fromId': row['from_node_id'],
-                'toId': row['to_node_id']
+                'id': row_dict['id'],
+                'fromId': row_dict['from_node_id'],
+                'toId': row_dict['to_node_id']
             })
         
-        # Load zones
+        # Load zones with zone_type
         zones = []
-        zone_rows = conn.execute(
+        cursor = conn.execute(
             'SELECT * FROM zones WHERE map_name = ?', (map_name,)
-        ).fetchall()
+        )
+        zone_rows = cursor.fetchall()
         
         for row in zone_rows:
+            row_dict = dict(row)
             try:
-                points_data = json.loads(row['points_json'])
+                points_data = json.loads(row_dict['points_json'])
                 zones.append({
-                    'id': row['id'],
-                    'name': row['name'],
+                    'id': row_dict['id'],
+                    'name': row_dict['name'],
+                    'type': row_dict.get('zone_type', 'normal'),  # Use .get() on dict
                     'points': points_data
                 })
             except json.JSONDecodeError:
-                logger.warning(f"Invalid JSON in zone {row['id']}, skipping")
+                logger.warning(f"Invalid JSON in zone {row_dict['id']}, skipping")
                 continue
         
         conn.close()
@@ -888,7 +884,6 @@ def load_nodes():
             'status': 'error',
             'message': f'Failed to load nodes: {str(e)}'
         }), 500
-
 @app.route('/clear-nodes', methods=['DELETE'])
 def clear_nodes():
     """Clear all nodes, arrows, and zones for a specific map"""
@@ -1060,6 +1055,7 @@ if __name__ == '__main__':
     print("🚀 Starting AMR Map Editor API Server...")
     print("📁 Database system: Per-map databases")
     print(f"📂 Database directory: {os.path.abspath(DATABASE_DIR)}")
+    print("📊 Simplified schema: map_name, node_type, x, y, z")
     print("✅ API ready!")
     print("\n🌐 Starting Flask server...")
     print("   📍 Local: http://localhost:5000")

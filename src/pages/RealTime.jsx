@@ -1,3 +1,5 @@
+
+
 // import React, { useState, useEffect, useRef } from "react";
 // import ROSLIB from "roslib";
 // import yaml from "js-yaml";
@@ -27,7 +29,6 @@
 //   const [pgmImage, setPgmImage] = useState(null);
 //   const [mapMetadata, setMapMetadata] = useState(null);
 //   const [rotation, setRotation] = useState(0); // Rotation state
-//   const [rotationInput, setRotationInput] = useState("0"); // Input field state
 
 //   // --- Map Loader State ---
 //   const [mapLoaderActive, setMapLoaderActive] = useState(false);
@@ -159,106 +160,54 @@
 
 //   // Save map data to localStorage whenever it changes
 //   useEffect(() => {
-//     const canvas = canvasRef.current;
-//     if (!canvas) return;
-//     const ctx = canvas.getContext("2d", { willReadFrequently: true });
-//     ctx.imageSmoothingEnabled = false;
-
-//     const container = canvas.parentElement;
-//     const containerWidth = container.clientWidth;
-//     const containerHeight = container.clientHeight;
-//     canvas.width = containerWidth;
-//     canvas.height = containerHeight;
-//     canvas.style.width = `${containerWidth}px`;
-//     canvas.style.height = `${containerHeight}px`;
-
-//     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-//     // If we have a PNG image loaded, draw it with PGM coordinate logic
-//     if (pngImage) {
-//       const { width, height } = pngImage;
-      
-//       ctx.save();
-//       ctx.translate(zoomState.offsetX, zoomState.offsetY);
-//       ctx.scale(zoomState.scale, zoomState.scale);
-
-//       // Draw the PNG image at (0,0) - same as PGM
-//       ctx.drawImage(pngImage, 0, 0, width, height);
-
-//       // Draw robot using the same coordinate logic as PGM
-//       if (robotPosition) {
-//         const { canvasX, canvasY, rosX, rosY } = robotPosition;
+//     if (pgmImage && mapMetadata) {
+//       try {
+//         const canvas = document.createElement('canvas');
+//         canvas.width = pgmImage.width;
+//         canvas.height = pgmImage.height;
+//         const ctx = canvas.getContext('2d');
+//         ctx.drawImage(pgmImage, 0, 0);
         
-//         // Draw robot as green circle with shadow
-//         ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-//         ctx.shadowBlur = 5;
-//         ctx.shadowOffsetX = 2;
-//         ctx.shadowOffsetY = 2;
+//         const mapData = {
+//           pgmImageData: canvas.toDataURL('image/png'),
+//           metadata: mapMetadata,
+//           width: pgmImage.width,
+//           height: pgmImage.height,
+//           zoomState: zoomState,
+//           timestamp: Date.now()
+//         };
         
-//         ctx.fillStyle = '#28a745';
-//         ctx.beginPath();
-//         ctx.arc(canvasX, canvasY, Math.max(4, 8 / zoomState.scale), 0, 2 * Math.PI);
-//         ctx.fill();
-        
-//         // Reset shadow
-//         ctx.shadowColor = 'transparent';
-//         ctx.shadowBlur = 0;
-//         ctx.shadowOffsetX = 0;
-//         ctx.shadowOffsetY = 0;
-        
-//         // Add black border
-//         ctx.strokeStyle = '#000';
-//         ctx.lineWidth = 2 / zoomState.scale;
-//         ctx.stroke();
-        
-   
+//         localStorage.setItem("savedMapData", JSON.stringify(mapData));
+//         console.log("💾 PGM Map saved to localStorage");
+//       } catch (e) {
+//         console.error("Error saving PGM map to localStorage:", e);
 //       }
-
-//       ctx.restore();
-//       return;
 //     }
-    
-//     // If we have a PGM image loaded, draw it
-//     if (pgmImage) {
-//       const { width, height } = pgmImage;
-      
-//       ctx.save();
-//       ctx.translate(zoomState.offsetX, zoomState.offsetY);
-//       ctx.scale(zoomState.scale, zoomState.scale);
 
-//       ctx.drawImage(pgmImage, 0, 0, width, height);
-
-//       if (robotPosition) {
-//         const { canvasX, canvasY, rosX, rosY } = robotPosition;
+//     if (pngImage && pngMapInfo) {
+//       try {
+//         const canvas = document.createElement('canvas');
+//         canvas.width = pngImage.width;
+//         canvas.height = pngImage.height;
+//         const ctx = canvas.getContext('2d');
+//         ctx.drawImage(pngImage, 0, 0);
         
-//         ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-//         ctx.shadowBlur = 5;
-//         ctx.shadowOffsetX = 2;
-//         ctx.shadowOffsetY = 2;
+//         const pngData = {
+//           pngImageData: canvas.toDataURL('image/png'),
+//           metadata: pngMapInfo,
+//           width: pngImage.width,
+//           height: pngImage.height,
+//           zoomState: zoomState,
+//           timestamp: Date.now()
+//         };
         
-//         ctx.fillStyle = '#28a745';
-//         ctx.beginPath();
-//         ctx.arc(canvasX, canvasY, Math.max(4, 8 / zoomState.scale), 0, 2 * Math.PI);
-//         ctx.fill();
-        
-//         ctx.shadowColor = 'transparent';
-//         ctx.shadowBlur = 0;
-//         ctx.shadowOffsetX = 0;
-//         ctx.shadowOffsetY = 0;
-        
-//         ctx.strokeStyle = '#000';
-//         ctx.lineWidth = 2 / zoomState.scale;
-//         ctx.stroke();
-        
-
+//         localStorage.setItem("savedPngData", JSON.stringify(pngData));
+//         console.log("💾 PNG Image saved to localStorage");
+//       } catch (e) {
+//         console.error("Error saving PNG image to localStorage:", e);
 //       }
-
-//       ctx.restore();
-//       return;
 //     }
-//   }, [mapMsg, pgmImage, pngImage, zoomState, robotPosition]);
-
-
+//   }, [pgmImage, mapMetadata, pngImage, pngMapInfo, zoomState]);
 
 //   // Center map on canvas
 //   const centerMapOnCanvas = (width, height) => {
@@ -323,19 +272,9 @@
 //         rotatedY = width - canvasX;
 //         break;
 //       default:
-//         // Custom rotation or 0° rotation
-//         if (rotation !== 0) {
-//           const rad = (rotation * Math.PI) / 180;
-//           const centerX = width / 2;
-//           const centerY = height / 2;
-//           const translatedX = canvasX - centerX;
-//           const translatedY = canvasY - centerY;
-//           rotatedX = translatedX * Math.cos(rad) - translatedY * Math.sin(rad) + centerX;
-//           rotatedY = translatedX * Math.sin(rad) + translatedY * Math.cos(rad) + centerY;
-//         } else {
-//           rotatedX = canvasX;
-//           rotatedY = canvasY;
-//         }
+//         // 0° rotation - no change
+//         rotatedX = canvasX;
+//         rotatedY = canvasY;
 //     }
     
 //     return { x: rotatedX, y: rotatedY };
@@ -366,16 +305,7 @@
 //         unrotatedY = unrotatedX;
 //         break;
 //       default:
-//         // Custom rotation or 0° rotation
-//         if (rotation !== 0) {
-//           const rad = (-rotation * Math.PI) / 180; // Inverse rotation
-//           const centerX = width / 2;
-//           const centerY = height / 2;
-//           const translatedX = canvasX - centerX;
-//           const translatedY = canvasY - centerY;
-//           unrotatedX = translatedX * Math.cos(rad) - translatedY * Math.sin(rad) + centerX;
-//           unrotatedY = translatedX * Math.sin(rad) + translatedY * Math.cos(rad) + centerY;
-//         }
+//         // 0° rotation - no change
 //         break;
 //     }
     
@@ -496,7 +426,6 @@
 //         setMapLoaderActive(false);
 //         setPngImage(null); // Clear PNG if PGM is loaded
 //         setRotation(0); // Reset rotation when loading new map
-//         setRotationInput("0"); // Reset input field
 
 //         centerMapOnCanvas(width, height);
 //         setDebugInfo(`🗺️ PGM Map loaded: ${width}x${height} | Resolution: ${parsedYaml.resolution || 0.05}`);
@@ -549,7 +478,6 @@
 //         setEditableMap(null);
 //         setMapMetadata(null);
 //         setRotation(0); // Reset rotation when loading new image
-//         setRotationInput("0"); // Reset input field
 
 //         centerMapOnCanvas(img.width, img.height);
 //         setDebugInfo(`🖼️ PNG Image loaded: ${img.width}x${img.height} | Resolution: ${parsedYaml.resolution || 0.05}`);
@@ -581,7 +509,6 @@
 //       setPngMapInfo(null);
 //       setMapLoadedFromFile(false);
 //       setRotation(0); // Reset rotation
-//       setRotationInput("0"); // Reset input field
 //       localStorage.removeItem("savedMapData");
 //       localStorage.removeItem("savedPngData");
 //       setDebugInfo("🗺️ Map/Image removed");
@@ -919,60 +846,14 @@
 //     }));
 //   };
 
-//   // Rotation handler - 90° increments
+//   // Rotation handler
 //   const handleRotate = () => {
-//     const newRotation = (rotation + 90) % 360;
-//     setRotation(newRotation);
-//     setRotationInput(newRotation.toString());
+//     setRotation((prev) => (prev + 90) % 360);
 //   };
 
 //   // Reset rotation handler
 //   const handleResetRotation = () => {
 //     setRotation(0);
-//     setRotationInput("0");
-//   };
-
-//   // Custom rotation input handler
-//   const handleRotationInputChange = (e) => {
-//     const value = e.target.value;
-//     setRotationInput(value);
-    
-//     // Validate and set rotation
-//     if (value === "") {
-//       return; // Allow empty input
-//     }
-    
-//     const degrees = parseFloat(value);
-//     if (!isNaN(degrees) && degrees >= 0 && degrees <= 360) {
-//       const normalizedDegrees = degrees % 360;
-//       setRotation(normalizedDegrees);
-//     }
-//   };
-
-//   // Apply custom rotation when input loses focus or Enter is pressed
-//   const handleRotationInputBlur = () => {
-//     if (rotationInput === "") {
-//       setRotationInput("0");
-//       setRotation(0);
-//       return;
-//     }
-    
-//     const degrees = parseFloat(rotationInput);
-//     if (isNaN(degrees) || degrees < 0 || degrees > 360) {
-//       // Reset to current rotation if invalid
-//       setRotationInput(rotation.toString());
-//     } else {
-//       const normalizedDegrees = degrees % 360;
-//       setRotation(normalizedDegrees);
-//       setRotationInput(normalizedDegrees.toString());
-//     }
-//   };
-
-//   const handleRotationInputKeyPress = (e) => {
-//     if (e.key === 'Enter') {
-//       handleRotationInputBlur();
-//       e.target.blur(); // Remove focus from input
-//     }
 //   };
 
 //   // --- Drawing the map ---
@@ -1024,7 +905,7 @@
         
 //         ctx.fillStyle = '#28a745';
 //         ctx.beginPath();
-//         ctx.arc(canvasX, canvasY, Math.max(4, 8 / zoomState.scale), 0, 2 * Math.PI);
+//         ctx.arc(canvasX, canvasY, Math.max(2, 4 / zoomState.scale), 0, 2 * Math.PI);
 //         ctx.fill();
         
 //         // Reset shadow
@@ -1038,14 +919,8 @@
 //         ctx.lineWidth = 2 / zoomState.scale;
 //         ctx.stroke();
         
-//         // // Add coordinates label with background
-//         // const label = `(${rosX.toFixed(2)}, ${rosY.toFixed(2)})`;
-//         // ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-//         // ctx.fillRect(canvasX + 8, canvasY - 25, 100, 18);
-        
-//         // ctx.fillStyle = '#000';
-//         // ctx.font = isMobile ? '10px Arial' : '12px Arial';
-//         // ctx.fillText(label, canvasX + 12, canvasY - 12);
+//         // Add coordinates label with background
+
 //       }
 
 //       ctx.restore();
@@ -1093,13 +968,7 @@
 //         ctx.lineWidth = 2 / zoomState.scale;
 //         ctx.stroke();
         
-//         const label = `(${rosX.toFixed(2)}, ${rosY.toFixed(2)})`;
-//         ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-//         ctx.fillRect(canvasX + 8, canvasY - 25, 100, 18);
-        
-//         ctx.fillStyle = '#000';
-//         ctx.font = isMobile ? '10px Arial' : '12px Arial';
-//         ctx.fillText(label, canvasX + 12, canvasY - 12);
+
 //       }
 
 //       ctx.restore();
@@ -1702,7 +1571,7 @@
 //           height: "100%",
 //           border: "2px solid #e2e8f0", 
 //           borderRadius: "8px", 
-//           background: "#ffffff", 
+//           background: "#f8fafc", 
 //           minHeight: isMobile ? "300px" : "500px",
 //           position: "relative",
 //           overflow: "hidden",
@@ -1838,40 +1707,6 @@
 //               {rotation}°
 //             </button>
 
-//             {/* Rotation Input Field */}
-//             <div style={{
-//               display: "flex",
-//               flexDirection: "column",
-//               alignItems: "center",
-//               gap: "2px"
-//             }}>
-//               <input
-//                 type="text"
-//                 value={rotationInput}
-//                 onChange={handleRotationInputChange}
-//                 onBlur={handleRotationInputBlur}
-//                 onKeyPress={handleRotationInputKeyPress}
-//                 style={{
-//                   width: isMobile ? "28px" : "36px",
-//                   height: isMobile ? "20px" : "24px",
-//                   textAlign: "center",
-//                   fontSize: isMobile ? "10px" : "11px",
-//                   border: "1px solid #d1d5db",
-//                   borderRadius: "3px",
-//                   background: "#ffffff"
-//                 }}
-//                 title="Enter rotation degrees (0-360)"
-//                 maxLength={3}
-//               />
-//               <div style={{
-//                 fontSize: isMobile ? "8px" : "9px",
-//                 color: "#6b7280",
-//                 textAlign: "center"
-//               }}>
-//                 deg
-//               </div>
-//             </div>
-
 //             <button
 //               onClick={fetchRobotPosition}
 //               style={{
@@ -1915,6 +1750,7 @@
 //     </div>
 //   );
 // }
+
 
 
 import React, { useState, useEffect, useRef } from "react";
@@ -2152,87 +1988,116 @@ export default function RealTime() {
   }, []);
 
   // --- FIXED Coordinate conversions - ROS coordinates remain consistent regardless of rotation ---
-  const rosToCanvasCoords = (rosX, rosY) => {
-    if (!mapParamsRef.current) {
-      console.log("⚠️ No map parameters for coordinate conversion");
-      return { x: 0, y: 0 };
-    }
+ const rosToCanvasCoords = (rosX, rosY, applyRotation = true) => {
+  if (!mapParamsRef.current) {
+    console.log("⚠️ No map parameters for coordinate conversion");
+    return { x: 0, y: 0 };
+  }
 
-    const { resolution, originX, originY, width, height } = mapParamsRef.current;
+  const { resolution, originX, originY, width, height } = mapParamsRef.current;
+  
+  // Convert ROS coordinates to pixel coordinates
+  const pixelX = (rosX - originX) / resolution;
+  const pixelY = (rosY - originY) / resolution;
+  
+  // Flip Y-axis (ROS has Y-up, canvas has Y-down)
+  let canvasX = pixelX;
+  let canvasY = height - pixelY;
+  
+  // Apply rotation transformation if needed
+  if (applyRotation && rotation !== 0) {
+    const centerX = width / 2;
+    const centerY = height / 2;
     
-    // Convert ROS coordinates to pixel coordinates
-    const pixelX = (rosX - originX) / resolution;
-    const pixelY = (rosY - originY) / resolution;
+    // Translate to origin
+    const translatedX = canvasX - centerX;
+    const translatedY = canvasY - centerY;
     
-    // Flip Y-axis (ROS has Y-up, canvas has Y-down)
-    const canvasX = pixelX;
-    const canvasY = height - pixelY;
+    let rotatedX, rotatedY;
     
-    // Apply rotation transformation to match the displayed image
-    let rotatedX = canvasX;
-    let rotatedY = canvasY;
-    
+    // Apply rotation
     switch (rotation) {
       case 90:
-        // For 90° rotation: (x, y) -> (height - y, x)
-        rotatedX = height - canvasY;
-        rotatedY = canvasX;
+        // 90° clockwise rotation: (x, y) → (y, -x)
+        rotatedX = translatedY;
+        rotatedY = -translatedX;
         break;
       case 180:
-        // For 180° rotation: (x, y) -> (width - x, height - y)
-        rotatedX = width - canvasX;
-        rotatedY = height - canvasY;
+        // 180° rotation: (x, y) → (-x, -y)
+        rotatedX = -translatedX;
+        rotatedY = -translatedY;
         break;
       case 270:
-        // For 270° rotation: (x, y) -> (y, width - x)
-        rotatedX = canvasY;
-        rotatedY = width - canvasX;
+        // 270° clockwise rotation (90° counter-clockwise): (x, y) → (-y, x)
+        rotatedX = -translatedY;
+        rotatedY = translatedX;
         break;
       default:
-        // 0° rotation - no change
-        rotatedX = canvasX;
-        rotatedY = canvasY;
+        rotatedX = translatedX;
+        rotatedY = translatedY;
     }
     
-    return { x: rotatedX, y: rotatedY };
-  };
+    // Translate back
+    canvasX = rotatedX + centerX;
+    canvasY = rotatedY + centerY;
+  }
+  
+  return { x: canvasX, y: canvasY };
+};
 
-  const canvasToRosCoords = (canvasX, canvasY) => {
-    if (!mapParamsRef.current) return null;
-    const { resolution, originX, originY, width, height } = mapParamsRef.current;
+
+ const canvasToRosCoords = (canvasX, canvasY, applyRotation = true) => {
+  if (!mapParamsRef.current) return null;
+  const { resolution, originX, originY, width, height } = mapParamsRef.current;
+  
+  // Apply inverse rotation first if needed
+  let unrotatedX = canvasX;
+  let unrotatedY = canvasY;
+  
+  if (applyRotation && rotation !== 0) {
+    const centerX = width / 2;
+    const centerY = height / 2;
     
-    // Apply inverse rotation transformation first
-    let unrotatedX = canvasX;
-    let unrotatedY = canvasY;
+    // Translate to origin
+    const translatedX = unrotatedX - centerX;
+    const translatedY = unrotatedY - centerY;
     
+    let inverseX, inverseY;
+    
+    // Apply inverse rotation
     switch (rotation) {
       case 90:
-        // Inverse of 90°: (x, y) -> (y, height - x)
-        unrotatedX = unrotatedY;
-        unrotatedY = height - unrotatedX;
+        // Inverse of 90° rotation: (x, y) → (-y, x)
+        inverseX = -translatedY;
+        inverseY = translatedX;
         break;
       case 180:
-        // Inverse of 180°: (x, y) -> (width - x, height - y)
-        unrotatedX = width - unrotatedX;
-        unrotatedY = height - unrotatedY;
+        // Inverse of 180° rotation: same as forward (180° is its own inverse)
+        inverseX = -translatedX;
+        inverseY = -translatedY;
         break;
       case 270:
-        // Inverse of 270°: (x, y) -> (width - y, x)
-        unrotatedX = width - unrotatedY;
-        unrotatedY = unrotatedX;
+        // Inverse of 270° rotation: (x, y) → (y, -x)
+        inverseX = translatedY;
+        inverseY = -translatedX;
         break;
       default:
-        // 0° rotation - no change
-        break;
+        inverseX = translatedX;
+        inverseY = translatedY;
     }
     
-    // Convert back to ROS coordinates
-    const pixelY = height - unrotatedY; // Unflip Y-axis
-    const worldX = originX + unrotatedX * resolution;
-    const worldY = originY + pixelY * resolution;
-    
-    return { x: +worldX.toFixed(2), y: +worldY.toFixed(2) };
-  };
+    // Translate back
+    unrotatedX = inverseX + centerX;
+    unrotatedY = inverseY + centerY;
+  }
+  
+  // Convert back to ROS coordinates
+  const pixelY = height - unrotatedY; // Unflip Y-axis
+  const worldX = originX + unrotatedX * resolution;
+  const worldY = originY + pixelY * resolution;
+  
+  return { x: +worldX.toFixed(2), y: +worldY.toFixed(2) };
+};
 
   // --- Map Loader Functions ---
   const handleLoadMapFiles = () => {
@@ -2522,55 +2387,57 @@ export default function RealTime() {
 
   // Fetch robot position from Flask API
   const fetchRobotPosition = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/robot_position`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      
-      if ((data.status === 'success' || data.status === 'waiting') && mapParamsRef.current) {
-        const positionData = data.data;
-        const { x, y, timestamp } = positionData;
-        
-        if (x !== undefined && y !== undefined) {
-          // Always convert ROS coordinates to canvas coordinates using current rotation
-          const canvasCoords = rosToCanvasCoords(x, y);
-
-          setMessageCount(prev => prev + 1);
-          setDebugInfo(`🤖 Robot: (${x.toFixed(2)}, ${y.toFixed(2)}) | Rotation: ${rotation}° | Updates: ${messageCount + 1}`);
-          
-          setRobotPosition({
-            rosX: x,
-            rosY: y,
-            canvasX: canvasCoords.x,
-            canvasY: canvasCoords.y,
-            timestamp: timestamp,
-          });
-
-          localStorage.setItem("lastRobotPose", JSON.stringify({
-            rosX: x,
-            rosY: y,
-            canvasX: canvasCoords.x,
-            canvasY: canvasCoords.y,
-            timestamp: timestamp,
-          }));
-
-          setApiConnected(true);
-          setConnectionStatus("connected");
-        } else if (data.status === 'waiting') {
-          setDebugInfo("⏳ Waiting for robot position data...");
-        }
-      }
-    } catch (error) {
-      console.error("❌ Error fetching robot position:", error);
-      setApiConnected(false);
-      setConnectionStatus("error");
-      setDebugInfo("❌ Failed to connect to position API");
+  try {
+    const response = await fetch(`${API_BASE_URL}/robot_position`);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
-  };
+    
+    const data = await response.json();
+    
+    if ((data.status === 'success' || data.status === 'waiting') && mapParamsRef.current) {
+      const positionData = data.data;
+      const { x, y, timestamp } = positionData;
+      
+      if (x !== undefined && y !== undefined) {
+        // Convert ROS coordinates to canvas coordinates WITH rotation
+        const canvasCoords = rosToCanvasCoords(x, y, true); // Apply rotation
+
+        setMessageCount(prev => prev + 1);
+        setDebugInfo(`🤖 Robot: (${x.toFixed(2)}, ${y.toFixed(2)}) | Rotation: ${rotation}° | Updates: ${messageCount + 1}`);
+        
+        setRobotPosition({
+          rosX: x,
+          rosY: y,
+          canvasX: canvasCoords.x,
+          canvasY: canvasCoords.y,
+          timestamp: timestamp,
+        });
+
+        localStorage.setItem("lastRobotPose", JSON.stringify({
+          rosX: x,
+          rosY: y,
+          canvasX: canvasCoords.x,
+          canvasY: canvasCoords.y,
+          timestamp: timestamp,
+          rotation: rotation, // Save current rotation
+        }));
+
+        setApiConnected(true);
+        setConnectionStatus("connected");
+      } else if (data.status === 'waiting') {
+        setDebugInfo("⏳ Waiting for robot position data...");
+      }
+    }
+  } catch (error) {
+    console.error("❌ Error fetching robot position:", error);
+    setApiConnected(false);
+    setConnectionStatus("error");
+    setDebugInfo("❌ Failed to connect to position API");
+  }
+};
+
 
   // Check API health
   const checkApiHealth = async () => {
@@ -2605,26 +2472,26 @@ export default function RealTime() {
   }, []);
 
   // Restore robot position from localStorage - recalculate canvas coordinates when rotation changes
-  useEffect(() => {
-    const savedPose = localStorage.getItem("lastRobotPose");
-    if (savedPose && mapParamsRef.current) {
-      try {
-        const pose = JSON.parse(savedPose);
-        // Recalculate canvas coordinates using current rotation
-        const canvasCoords = rosToCanvasCoords(pose.rosX, pose.rosY);
-        setRobotPosition({
-          rosX: pose.rosX,
-          rosY: pose.rosY,
-          canvasX: canvasCoords.x,
-          canvasY: canvasCoords.y,
-          timestamp: pose.timestamp,
-        });
-        console.log("💾 Restored robot position from localStorage with current rotation");
-      } catch (e) {
-        console.error("Error restoring robot position:", e);
-      }
+useEffect(() => {
+  const savedPose = localStorage.getItem("lastRobotPose");
+  if (savedPose && mapParamsRef.current) {
+    try {
+      const pose = JSON.parse(savedPose);
+      // Recalculate canvas coordinates with current rotation
+      const canvasCoords = rosToCanvasCoords(pose.rosX, pose.rosY, true);
+      setRobotPosition({
+        rosX: pose.rosX,
+        rosY: pose.rosY,
+        canvasX: canvasCoords.x,
+        canvasY: canvasCoords.y,
+        timestamp: pose.timestamp,
+      });
+      console.log("💾 Restored robot position from localStorage with current rotation");
+    } catch (e) {
+      console.error("Error restoring robot position:", e);
     }
-  }, [rotation]); // Re-run when rotation changes
+  }
+}, [rotation]); // Re-run when rotation changes
 
   // Touch event handlers
   const handleTouchStart = (e) => {
@@ -2775,142 +2642,30 @@ export default function RealTime() {
 
   // --- Drawing the map ---
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    ctx.imageSmoothingEnabled = false;
+  const canvas = canvasRef.current;
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.imageSmoothingEnabled = false;
 
-    const container = canvas.parentElement;
-    const containerWidth = container.clientWidth;
-    const containerHeight = container.clientHeight;
-    canvas.width = containerWidth;
-    canvas.height = containerHeight;
-    canvas.style.width = `${containerWidth}px`;
-    canvas.style.height = `${containerHeight}px`;
+  const container = canvas.parentElement;
+  const containerWidth = container.clientWidth;
+  const containerHeight = container.clientHeight;
+  canvas.width = containerWidth;
+  canvas.height = containerHeight;
+  canvas.style.width = `${containerWidth}px`;
+  canvas.style.height = `${containerHeight}px`;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+  // If we have a PNG image loaded
+  if (pngImage) {
+    const { width, height } = pngImage;
     
-    // If we have a PNG image loaded, draw it with rotation
-    if (pngImage) {
-      const { width, height } = pngImage;
-      
-      ctx.save();
-      ctx.translate(zoomState.offsetX, zoomState.offsetY);
-      ctx.scale(zoomState.scale, zoomState.scale);
-
-      // Apply rotation transformation
-      if (rotation !== 0) {
-        const centerX = width / 2;
-        const centerY = height / 2;
-        ctx.translate(centerX, centerY);
-        ctx.rotate((rotation * Math.PI) / 180);
-        ctx.translate(-centerX, -centerY);
-      }
-
-      // Draw the PNG image
-      ctx.drawImage(pngImage, 0, 0, width, height);
-
-      // Draw robot - coordinates are already rotated in rosToCanvasCoords
-      if (robotPosition) {
-        const { canvasX, canvasY, rosX, rosY } = robotPosition;
-        
-        // Draw robot as green circle with shadow
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-        ctx.shadowBlur = 5;
-        ctx.shadowOffsetX = 2;
-        ctx.shadowOffsetY = 2;
-        
-        ctx.fillStyle = '#28a745';
-        ctx.beginPath();
-        ctx.arc(canvasX, canvasY, Math.max(2, 4 / zoomState.scale), 0, 2 * Math.PI);
-        ctx.fill();
-        
-        // Reset shadow
-        ctx.shadowColor = 'transparent';
-        ctx.shadowBlur = 0;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 0;
-        
-        // Add black border
-        ctx.strokeStyle = '#000';
-        ctx.lineWidth = 2 / zoomState.scale;
-        ctx.stroke();
-        
-        // Add coordinates label with background
-
-      }
-
-      ctx.restore();
-      return;
-    }
-    
-    // If we have a PGM image loaded, draw it with rotation
-    if (pgmImage) {
-      const { width, height } = pgmImage;
-      
-      ctx.save();
-      ctx.translate(zoomState.offsetX, zoomState.offsetY);
-      ctx.scale(zoomState.scale, zoomState.scale);
-
-      // Apply rotation transformation
-      if (rotation !== 0) {
-        const centerX = width / 2;
-        const centerY = height / 2;
-        ctx.translate(centerX, centerY);
-        ctx.rotate((rotation * Math.PI) / 180);
-        ctx.translate(-centerX, -centerY);
-      }
-
-      ctx.drawImage(pgmImage, 0, 0, width, height);
-
-      if (robotPosition) {
-        const { canvasX, canvasY, rosX, rosY } = robotPosition;
-        
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-        ctx.shadowBlur = 5;
-        ctx.shadowOffsetX = 2;
-        ctx.shadowOffsetY = 2;
-        
-        ctx.fillStyle = '#28a745';
-        ctx.beginPath();
-        ctx.arc(canvasX, canvasY, Math.max(4, 8 / zoomState.scale), 0, 2 * Math.PI);
-        ctx.fill();
-        
-        ctx.shadowColor = 'transparent';
-        ctx.shadowBlur = 0;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 0;
-        
-        ctx.strokeStyle = '#000';
-        ctx.lineWidth = 2 / zoomState.scale;
-        ctx.stroke();
-        
-
-      }
-
-      ctx.restore();
-      return;
-    }
-
-    // Original ROS map rendering
-    const mapToRender = editableMap || mapMsg;
-    if (!mapToRender) {
-      ctx.fillStyle = '#f8f9fa';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#6c757d';
-      ctx.font = isMobile ? '14px Arial' : '16px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText('Load a PGM map or PNG image to visualize robot movement', canvas.width / 2, canvas.height / 2);
-      return;
-    }
-
-    const { width, height, data } = mapToRender;
-
     ctx.save();
     ctx.translate(zoomState.offsetX, zoomState.offsetY);
     ctx.scale(zoomState.scale, zoomState.scale);
 
-    // Apply rotation transformation for ROS maps
+    // Apply rotation transformation to the map
     if (rotation !== 0) {
       const centerX = width / 2;
       const centerY = height / 2;
@@ -2919,39 +2674,69 @@ export default function RealTime() {
       ctx.translate(-centerX, -centerY);
     }
 
-    const imageData = ctx.createImageData(width, height);
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const val = data[y * width + x];
-        let r, g, b;
-        
-        if (val === -1) {
-          r = g = b = 200;
-        } else if (val === 0) {
-          r = g = b = 255;
-        } else if (val === 100) {
-          r = g = b = 100;
-        } else if (val > 0 && val < 100) {
-          const intensity = 255 - Math.floor(val * 2.2);
-          r = g = b = Math.max(100, Math.min(200, intensity));
-        } else {
-          r = 255; g = 200; b = 200;
-        }
-        
-        const py = height - 1 - y;
-        const i = (py * width + x) * 4;
-        imageData.data[i] = r;
-        imageData.data[i + 1] = g;
-        imageData.data[i + 2] = b;
-        imageData.data[i + 3] = 255;
-      }
-    }
-    
-    const off = document.createElement("canvas");
-    off.width = width; off.height = height;
-    off.getContext("2d").putImageData(imageData, 0, 0);
-    ctx.drawImage(off, 0, 0);
+    // Draw the PNG image (rotated)
+    ctx.drawImage(pngImage, 0, 0, width, height);
 
+    // Draw robot ON THE SAME ROTATED CANVAS
+    if (robotPosition) {
+      const { canvasX, canvasY, rosX, rosY } = robotPosition;
+      
+      // Draw robot as green circle with shadow
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+      ctx.shadowBlur = 5;
+      ctx.shadowOffsetX = 2;
+      ctx.shadowOffsetY = 2;
+      
+      ctx.fillStyle = '#28a745';
+      ctx.beginPath();
+      ctx.arc(canvasX, canvasY, Math.max(2, 4 / zoomState.scale), 0, 2 * Math.PI);
+      ctx.fill();
+      
+      // Reset shadow
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+      
+      // Add black border
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2 / zoomState.scale;
+      ctx.stroke();
+      
+      // Add coordinates label with background
+      const label = `(${rosX.toFixed(2)}, ${rosY.toFixed(2)})`;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.fillRect(canvasX + 8, canvasY - 25, 100, 18);
+      
+      ctx.fillStyle = '#000';
+      ctx.font = isMobile ? '10px Arial' : '12px Arial';
+      ctx.fillText(label, canvasX + 12, canvasY - 12);
+    }
+
+    ctx.restore();
+    return;
+  }
+  
+  // If we have a PGM image loaded
+  if (pgmImage) {
+    const { width, height } = pgmImage;
+    
+    ctx.save();
+    ctx.translate(zoomState.offsetX, zoomState.offsetY);
+    ctx.scale(zoomState.scale, zoomState.scale);
+
+    // Apply rotation transformation to the map
+    if (rotation !== 0) {
+      const centerX = width / 2;
+      const centerY = height / 2;
+      ctx.translate(centerX, centerY);
+      ctx.rotate((rotation * Math.PI) / 180);
+      ctx.translate(-centerX, -centerY);
+    }
+
+    ctx.drawImage(pgmImage, 0, 0, width, height);
+
+    // Draw robot ON THE SAME ROTATED CANVAS
     if (robotPosition) {
       const { canvasX, canvasY, rosX, rosY } = robotPosition;
       
@@ -2984,7 +2769,103 @@ export default function RealTime() {
     }
 
     ctx.restore();
-  }, [mapMsg, editableMap, zoomState, robotPosition, isMobile, pgmImage, pngImage, rotation]);
+    return;
+  }
+
+  // Original ROS map rendering
+  const mapToRender = editableMap || mapMsg;
+  if (!mapToRender) {
+    ctx.fillStyle = '#f8f9fa';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#6c757d';
+    ctx.font = isMobile ? '14px Arial' : '16px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('Load a PGM map or PNG image to visualize robot movement', canvas.width / 2, canvas.height / 2);
+    return;
+  }
+
+  const { width, height, data } = mapToRender;
+
+  ctx.save();
+  ctx.translate(zoomState.offsetX, zoomState.offsetY);
+  ctx.scale(zoomState.scale, zoomState.scale);
+
+  // Apply rotation transformation to the ROS map
+  if (rotation !== 0) {
+    const centerX = width / 2;
+    const centerY = height / 2;
+    ctx.translate(centerX, centerY);
+    ctx.rotate((rotation * Math.PI) / 180);
+    ctx.translate(-centerX, -centerY);
+  }
+
+  const imageData = ctx.createImageData(width, height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const val = data[y * width + x];
+      let r, g, b;
+      
+      if (val === -1) {
+        r = g = b = 200;
+      } else if (val === 0) {
+        r = g = b = 255;
+      } else if (val === 100) {
+        r = g = b = 100;
+      } else if (val > 0 && val < 100) {
+        const intensity = 255 - Math.floor(val * 2.2);
+        r = g = b = Math.max(100, Math.min(200, intensity));
+      } else {
+        r = 255; g = 200; b = 200;
+      }
+      
+      const py = height - 1 - y;
+      const i = (py * width + x) * 4;
+      imageData.data[i] = r;
+      imageData.data[i + 1] = g;
+      imageData.data[i + 2] = b;
+      imageData.data[i + 3] = 255;
+    }
+  }
+  
+  const off = document.createElement("canvas");
+  off.width = width; off.height = height;
+  off.getContext("2d").putImageData(imageData, 0, 0);
+  ctx.drawImage(off, 0, 0);
+
+  // Draw robot ON THE SAME ROTATED CANVAS
+  if (robotPosition) {
+    const { canvasX, canvasY, rosX, rosY } = robotPosition;
+    
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+    ctx.shadowBlur = 5;
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 2;
+    
+    ctx.fillStyle = '#28a745';
+    ctx.beginPath();
+    ctx.arc(canvasX, canvasY, Math.max(4, 8 / zoomState.scale), 0, 2 * Math.PI);
+    ctx.fill();
+    
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2 / zoomState.scale;
+    ctx.stroke();
+    
+    const label = `(${rosX.toFixed(2)}, ${rosY.toFixed(2)})`;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.fillRect(canvasX + 8, canvasY - 25, 100, 18);
+    
+    ctx.fillStyle = '#000';
+    ctx.font = isMobile ? '10px Arial' : '12px Arial';
+    ctx.fillText(label, canvasX + 12, canvasY - 12);
+  }
+
+  ctx.restore();
+}, [mapMsg, editableMap, zoomState, robotPosition, isMobile, pgmImage, pngImage, rotation]);
 
   // Map Loader Modal
   const MapLoaderModal = () => {
