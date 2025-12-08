@@ -1810,7 +1810,7 @@ export default function RealTime() {
   const positionIntervalRef = useRef(null);
   
   // Flask API configuration
-  const API_BASE_URL = 'http://localhost:5001';
+  const API_BASE_URL = 'http://localhost:5000';
 
   // Load saved map data from localStorage on component mount
   useEffect(() => {

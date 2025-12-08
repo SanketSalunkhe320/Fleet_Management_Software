@@ -5195,6 +5195,7 @@ const saveMapToComputer = async () => {
     const { resolution, originX, originY } = mapParamsRef.current;
     
     const SCALE_FACTOR = 4;
+    const CHECKER_SIZE = 8; // Size of checkerboard squares
     
     // Create a temporary canvas for drawing everything
     const tempCanvas = document.createElement('canvas');
@@ -5232,7 +5233,7 @@ const saveMapToComputer = async () => {
       }
     }
 
-    // FIRST: Draw zones (they should be behind everything)
+    // Transform point helper function (same as saveMapAsPNG)
     const transformPoint = (point) => {
       if (rotation === 0) return { x: point.canvasX, y: point.canvasY };
       
@@ -5262,9 +5263,32 @@ const saveMapToComputer = async () => {
       return { x: rotatedX, y: rotatedY };
     };
 
-    // Draw zones with solid black/gray fill
+    // Helper function to check if a point is in a deleted area (for annotation skipping)
+    const isPointDeleted = (canvasX, canvasY) => {
+      // Convert canvas coordinates to map coordinates
+      const mapX = Math.floor(canvasX);
+      const mapY = Math.floor(canvasY);
+      
+      if (mapX < 0 || mapX >= width || mapY < 0 || mapY >= height) {
+        return true; // Outside map is considered deleted
+      }
+      
+      const val = mapMsg.data[mapY * width + mapX];
+      return val === -2 || val === -3; // -2 or -3 means deleted/cropped
+    };
+
+    // STEP 1: Draw zones with deletion check (same as saveMapAsPNG)
     zones.forEach((zone) => {
       if (zone.points && zone.points.length >= 3) {
+        // Check if zone center is in deleted area (skip if true)
+        const centerX = zone.points.reduce((sum, p) => sum + transformPoint(p).x, 0) / zone.points.length;
+        const centerY = zone.points.reduce((sum, p) => sum + transformPoint(p).y, 0) / zone.points.length;
+        
+        if (isPointDeleted(centerX, centerY)) {
+          // Skip drawing zone if center is in deleted area
+          return;
+        }
+        
         tempCtx.beginPath();
         zone.points.forEach((point, idx) => {
           const transformed = transformPoint(point);
@@ -5283,11 +5307,13 @@ const saveMapToComputer = async () => {
       }
     });
 
-    // SECOND: Draw the base map OVER the zones with CHECKERBOARD for deleted areas
+    // STEP 2: Draw the base map OVER the zones with CHECKERBOARD for deleted areas
     const imageData = tempCtx.createImageData(width, height);
-    const checkerSize = 8; // Size of checkerboard squares
     let checkerboardPixels = 0;
     let deletedPixels = 0;
+    let occupiedPixels = 0;
+    let freePixels = 0;
+    let unknownPixels = 0;
     
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
@@ -5296,20 +5322,25 @@ const saveMapToComputer = async () => {
         const i = (py * width + x) * 4;
 
         let gray;
-        if (val === -2) {
-          // DELETED AREAS - DRAW CHECKERBOARD PATTERN
-          const isCheckered = ((Math.floor(x / checkerSize) + Math.floor(y / checkerSize)) % 2) === 0;
+        if (val === -3 || val === -2) {
+          // CROPPED AREAS (value -3) or DELETED AREAS (-2) - DRAW CHECKERBOARD PATTERN
+          const isCheckered = ((Math.floor(x / CHECKER_SIZE) + Math.floor(y / CHECKER_SIZE)) % 2) === 0;
           gray = isCheckered ? 180 : 220; // Checkerboard pattern (dark gray / light gray)
           checkerboardPixels++;
           deletedPixels++;
         } else if (val === -1) {
           gray = 205; // Unknown - medium gray
+          unknownPixels++;
         } else if (val === 0) {
           gray = 255; // Free space - white
+          freePixels++;
         } else if (val === 100) {
           gray = 0; // Occupied - black
+          occupiedPixels++;
         } else {
           gray = 255 - Math.floor((val / 100) * 255); // Grayscale based on occupancy
+          if (val > 50) occupiedPixels++;
+          else freePixels++;
         }
 
         imageData.data[i] = gray;
@@ -5325,14 +5356,39 @@ const saveMapToComputer = async () => {
     offCanvas.getContext("2d").putImageData(imageData, 0, 0);
     tempCtx.drawImage(offCanvas, 0, 0, width, height);
 
-    // THIRD: Draw arrows (on top of map)
+    // STEP 3: Draw arrows with deletion check (same as saveMapAsPNG)
     arrows.forEach((arrow) => {
       const fromNode = nodes.find(n => n.id === arrow.fromId);
       const toNode = nodes.find(n => n.id === arrow.toId);
       
       if (fromNode && toNode) {
+        // Check if either endpoint is in deleted area
+        const fromTransformed = transformPoint(fromNode);
+        const toTransformed = transformPoint(toNode);
+        
+        if (isPointDeleted(fromTransformed.x, fromTransformed.y) || 
+            isPointDeleted(toTransformed.x, toTransformed.y)) {
+          // Skip drawing arrow if endpoints are in deleted areas
+          return;
+        }
+        
         const allPoints = [fromNode, ...(arrow.points || []), toNode];
         if (allPoints.length < 2) return;
+        
+        // Check all points for deletion
+        let hasDeletedPoint = false;
+        for (const point of allPoints) {
+          const transformed = transformPoint(point);
+          if (isPointDeleted(transformed.x, transformed.y)) {
+            hasDeletedPoint = true;
+            break;
+          }
+        }
+        
+        if (hasDeletedPoint) {
+          // Skip drawing arrow if any point is in deleted area
+          return;
+        }
         
         tempCtx.strokeStyle = "rgba(0, 0, 0, 1.0)"; // Solid black
         tempCtx.lineWidth = 4 / SCALE_FACTOR;
@@ -5372,9 +5428,15 @@ const saveMapToComputer = async () => {
       }
     });
 
-    // FOURTH: Draw nodes (on top of everything)
+    // STEP 4: Draw nodes with deletion check (same as saveMapAsPNG)
     nodes.forEach((node) => {
       const transformed = transformPoint(node);
+      
+      // Check if node is in deleted area
+      if (isPointDeleted(transformed.x, transformed.y)) {
+        // Skip drawing node if it's in deleted area
+        return;
+      }
       
       // Draw node as solid black circle
       tempCtx.beginPath();
@@ -5446,13 +5508,18 @@ free_thresh: 0.25
 # Original size: ${width}x${height} pixels
 # Scaled size: ${tempCanvas.width}x${tempCanvas.height} pixels
 # Rotation: ${rotation}°
+# Pixel Statistics:
+#   Checkerboard (deleted/cropped): ${checkerboardPixels} pixels
+#   Occupied (black): ${occupiedPixels} pixels
+#   Free (white): ${freePixels} pixels
+#   Unknown (gray): ${unknownPixels} pixels
 # Annotations: ${nodes.length} nodes, ${arrows.length} arrows, ${zones.length} zones
-# Zones: Black/dark gray
-# Arrows: Black lines
-# Nodes: Black circles with white border
-# Deleted areas (-2): CHECKERBOARD PATTERN (180/220 gray)
+# Zones: Black/dark gray (NOT drawn on deleted areas)
+# Arrows: Black lines (NOT drawn through deleted areas)
+# Nodes: Black circles with white border (NOT drawn on deleted areas)
+# Deleted areas (-2, -3): CHECKERBOARD PATTERN (180/220 gray)
 # Deleted pixels: ${deletedPixels} (${checkerboardPixels} shown as checkerboard)
-# Checkerboard pattern: 8px squares alternating between gray 180 and 220
+# Checkerboard pattern: ${CHECKER_SIZE}px squares alternating between gray 180 and 220
 # Note: In PNG export, these areas would be transparent
 # For PGM, checkerboard indicates "removed/not part of map"`;
 
@@ -5481,7 +5548,7 @@ free_thresh: 0.25
       URL.revokeObjectURL(yamlUrl);
     }, 100);
 
-    alert(`✅ High-resolution PGM map exported with CHECKERBOARD!\n\n📁 Files saved:\n- ${mapName || 'exported_map'}_rotated_${rotation}_${SCALE_FACTOR}x.pgm\n- ${mapName || 'exported_map'}_rotated_${rotation}_${SCALE_FACTOR}x.yaml\n- debug_pgm_preview_with_checkerboard.png (preview)\n🔄 Rotation: ${rotation}°\n📊 Size: ${tempCanvas.width} x ${tempCanvas.height} pixels (${SCALE_FACTOR}x)\n📍 Resolution: ${newResolution.toFixed(6)} m/pixel\n◻️ Deleted areas: CHECKERBOARD PATTERN (not white)\n🗑️ Deleted pixels: ${deletedPixels}\n⚫ Annotations: Black (zones, arrows, nodes)`);
+    alert(`✅ High-resolution PGM map exported with CHECKERBOARD!\n\n📁 Files saved:\n- ${mapName || 'exported_map'}_rotated_${rotation}_${SCALE_FACTOR}x.pgm\n- ${mapName || 'exported_map'}_rotated_${rotation}_${SCALE_FACTOR}x.yaml\n- debug_pgm_preview_with_checkerboard.png (preview)\n🔄 Rotation: ${rotation}°\n📊 Size: ${tempCanvas.width} x ${tempCanvas.height} pixels (${SCALE_FACTOR}x)\n📍 Resolution: ${newResolution.toFixed(6)} m/pixel\n◻️ Deleted areas: CHECKERBOARD PATTERN (180/220 gray)\n🗑️ Deleted pixels: ${deletedPixels}\n⚫ Annotations: Black (zones, arrows, nodes)\n⚠️ Annotations NOT drawn on deleted areas`);
 
   } catch (error) {
     console.error('Error exporting high-resolution PGM map:', error);
@@ -6012,47 +6079,67 @@ const handleTouchEnd = () => {
     }
   };
 // Add keyboard shortcuts after your other useEffect hooks
-useEffect(() => {
-  const handleKeyDown = (e) => {
-    // Spacebar for temporary pan tool
-    if (e.code === 'Space' && !e.repeat) {
-      e.preventDefault();
-      const prevTool = tool;
-      setTool("pan");
-      
-      // Store previous tool to restore it when space is released
-      const restoreTool = (e) => {
-        if (e.code === 'Space') {
-          setTool(prevTool);
-          window.removeEventListener('keyup', restoreTool);
-        }
-      };
-      window.addEventListener('keyup', restoreTool);
-    }
-    
-    // Ctrl+Z for undo, Ctrl+Y for redo
-    if (e.ctrlKey) {
-      if (e.key === 'z' || e.key === 'Z') {
-        e.preventDefault();
-        if (e.shiftKey) {
-          handleRedo();
-        } else {
-          handleUndo();
-        }
-      }
-      if (e.key === 'y' || e.key === 'Y') {
-        e.preventDefault();
-        handleRedo();
-      }
-    }
-  };
 
-  window.addEventListener('keydown', handleKeyDown);
-  
-  return () => {
-    window.removeEventListener('keydown', handleKeyDown);
-  };
-}, [tool, handleUndo, handleRedo]);
+  // Add keyboard shortcuts after your other useEffect hooks
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Spacebar for temporary pan tool
+      if (e.code === 'Space' && !e.repeat) {
+        e.preventDefault();
+        const prevTool = tool;
+        setTool("pan");
+        
+        // Store previous tool to restore it when space is released
+        const restoreTool = (e) => {
+          if (e.code === 'Space') {
+            setTool(prevTool);
+            window.removeEventListener('keyup', restoreTool);
+          }
+        };
+        window.addEventListener('keyup', restoreTool);
+      }
+      
+      // Ctrl+Z for undo, Ctrl+Shift+Z or Ctrl+Y for redo
+      if (e.ctrlKey) {
+        if (e.key === 'z' || e.key === 'Z') {
+          e.preventDefault();
+          if (e.shiftKey) {
+            // Ctrl+Shift+Z for redo
+            handleRedo();
+          } else {
+            // Ctrl+Z for undo
+            handleUndo();
+          }
+        }
+        if (e.key === 'y' || e.key === 'Y') {
+          e.preventDefault();
+          // Ctrl+Y for redo
+          handleRedo();
+        }
+      }
+      
+      // Alternative: Cmd+Z and Cmd+Shift+Z for Mac
+      if (e.metaKey) {
+        if (e.key === 'z' || e.key === 'Z') {
+          e.preventDefault();
+          if (e.shiftKey) {
+            // Cmd+Shift+Z for redo
+            handleRedo();
+          } else {
+            // Cmd+Z for undo
+            handleUndo();
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [tool, handleUndo, handleRedo]); // Now these functions are stable
+
   // --- ROS connection ---
   useEffect(() => {
     const hostname = window.location.hostname;

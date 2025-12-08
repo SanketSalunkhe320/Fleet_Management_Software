@@ -18,7 +18,7 @@ export default function HealthCheck() {
 
   const fetchStatus = async () => {
     try {
-      const res = await fetch("http://localhost:5002/status");
+      const res = await fetch("http://localhost:5000/status");
       const data = await res.json();
 
       setRobotStatus(data.robot_status || "FAULT");

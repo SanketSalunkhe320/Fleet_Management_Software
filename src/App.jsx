@@ -37,6 +37,8 @@ export default function App() {
   return (
     <Router>
       <Routes>
+
+        
         {/* Public routes */}
         <Route path="/login" element={<LoginForm language={language} />} />
         <Route path="/signup" element={<SignupForm language={language} />} />
