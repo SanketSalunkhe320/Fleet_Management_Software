@@ -3563,6 +3563,7 @@
 
 
 import React, { useEffect, useRef, useState } from "react";
+import { useLanguage } from "../context/LanguageContext";
 import ROSLIB from "roslib";
 import yaml from "js-yaml";
 import JSZip from 'jszip';
@@ -3618,6 +3619,7 @@ const loadOpenCV = () => {
 };
 
 export default function MapEditor() {
+    const { t } = useLanguage();
   // --- Theme state with localStorage persistence ---
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem("mapEditorDarkMode");

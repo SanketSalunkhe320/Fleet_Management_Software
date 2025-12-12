@@ -7,8 +7,11 @@ import {
   FaCogs,
   FaMapMarkerAlt
 } from "react-icons/fa";
+import { useLanguage } from "../context/LanguageContext";
 
 export default function HealthCheck() {
+  const { t } = useLanguage();
+  
   const [robotStatus, setRobotStatus] = useState("FAULT");
   const [imuStatus, setImuStatus] = useState("FAULT");
   const [lidarStatus, setLidarStatus] = useState("FAULT");
@@ -56,13 +59,38 @@ export default function HealthCheck() {
     return () => clearInterval(interval);
   }, []);
 
+  // Create metrics array with translated names
   const metrics = [
-    { name: "AMR", value: robotStatus, icon: <FaBatteryFull className="text-xl text-blue-500" /> },
-    { name: "IMU", value: imuStatus, icon: <FaThermometerHalf className="text-xl text-green-500" /> },
-    { name: "LIDAR", value: lidarStatus, icon: <FaSatelliteDish className="text-xl text-orange-500" /> },
-    { name: "Depth Camera", value: cameraStatus, icon: <FaCamera className="text-xl text-purple-500" /> },
-    { name: "Motor Drive", value: motorStatus, icon: <FaCogs className="text-xl text-indigo-500" /> },
-    // { name: "Position", value: robotPosition, icon: <FaMapMarkerAlt className="text-xl text-red-500" /> },
+    { 
+      name: t("health.amr"), 
+      value: robotStatus, 
+      icon: <FaBatteryFull className="text-xl text-blue-500" /> 
+    },
+    { 
+      name: t("health.imu"), 
+      value: imuStatus, 
+      icon: <FaThermometerHalf className="text-xl text-green-500" /> 
+    },
+    { 
+      name: t("health.lidar"), 
+      value: lidarStatus, 
+      icon: <FaSatelliteDish className="text-xl text-orange-500" /> 
+    },
+    { 
+      name: t("health.camera"), 
+      value: cameraStatus, 
+      icon: <FaCamera className="text-xl text-purple-500" /> 
+    },
+    { 
+      name: t("health.motor"), 
+      value: motorStatus, 
+      icon: <FaCogs className="text-xl text-indigo-500" /> 
+    },
+    // { 
+    //   name: t("health.position"), 
+    //   value: robotPosition, 
+    //   icon: <FaMapMarkerAlt className="text-xl text-red-500" /> 
+    // },
   ];
 
   const getStatusColor = (status) => {
@@ -82,12 +110,9 @@ export default function HealthCheck() {
     return "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200";
   };
 
-
-
-  
   return (
     <div className="text-slate-900 dark:text-slate-100 select-none">
-      <h2 className="text-xl font-semibold mb-4">Health Check</h2>
+      <h2 className="text-xl font-semibold mb-4">{t("health_check")}</h2>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {metrics.map((m) => (
