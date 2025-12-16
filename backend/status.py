@@ -1,3 +1,5 @@
+
+
 # #!/usr/bin/env python3
 # """
 # UNIFIED AMR SYSTEM API - PORT 5000
@@ -7,14 +9,17 @@
 # 2. ROS2 AMCL Position Reader (app1.py) - Port 5001 
 # 3. ROS2 Robot Status Monitor (topicstatus.py) - Port 5002
 
+# WITH DATABASE STORAGE FOR AMCL POSITIONS
+
 # All running on single port: 5000
 # """
 
 # from flask import Flask, request, jsonify
 # from flask_cors import CORS
+# from flask_sqlalchemy import SQLAlchemy
+# from datetime import datetime
 # import sqlite3
 # import json
-# from datetime import datetime
 # import os
 # import logging
 # import re
@@ -52,8 +57,36 @@
 # app = Flask(__name__)
 # CORS(app)
 
-# # Database configuration
-# DATABASE_DIR = 'map_databases'
+# # Database configuration for robot positions
+# app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///robot_positions.db'
+# app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# db = SQLAlchemy(app)
+
+# # Database Model for robot positions
+# class RobotPosition(db.Model):
+#     id = db.Column(db.Integer, primary_key=True)
+#     x = db.Column(db.Float, nullable=False)
+#     y = db.Column(db.Float, nullable=False)
+#     yaw = db.Column(db.Float, nullable=False)
+#     timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+#     header_stamp = db.Column(db.String(50))
+#     message_count = db.Column(db.Integer)
+#     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    
+#     def to_dict(self):
+#         return {
+#             'id': self.id,
+#             'x': self.x,
+#             'y': self.y,
+#             'yaw': self.yaw,
+#             'timestamp': self.timestamp.isoformat() if self.timestamp else None,
+#             'header_stamp': self.header_stamp,
+#             'message_count': self.message_count,
+#             'created_at': self.created_at.isoformat() if self.created_at else None
+#         }
+
+# # Map annotation database configuration
+# MAP_DATABASE_DIR = 'map_databases'
 
 # # Network filtering (optional)
 # ALLOWED_NETWORK_STR = os.getenv("ALLOWED_NETWORK", None)
@@ -104,7 +137,7 @@
 # }
 
 # # ============================================================================
-# # Helper Functions
+# # Helper Functions for Map Databases
 # # ============================================================================
 
 # def sanitize_map_name(map_name):
@@ -115,19 +148,19 @@
 #         sanitized = 'default_map'
 #     return sanitized
 
-# def get_database_path(map_name):
+# def get_map_database_path(map_name):
 #     """Get database path for a specific map"""
-#     if not os.path.exists(DATABASE_DIR):
-#         os.makedirs(DATABASE_DIR)
+#     if not os.path.exists(MAP_DATABASE_DIR):
+#         os.makedirs(MAP_DATABASE_DIR)
     
 #     safe_map_name = sanitize_map_name(map_name)
 #     database_name = f"{safe_map_name}.db"
-#     return os.path.join(DATABASE_DIR, database_name)
+#     return os.path.join(MAP_DATABASE_DIR, database_name)
 
-# def get_db_connection(map_name):
+# def get_map_db_connection(map_name):
 #     """Get database connection for a specific map with error handling"""
 #     try:
-#         db_path = get_database_path(map_name)
+#         db_path = get_map_database_path(map_name)
 #         conn = sqlite3.connect(db_path)
 #         conn.row_factory = sqlite3.Row
 #         return conn
@@ -135,10 +168,10 @@
 #         logger.error(f"Database connection error for map '{map_name}': {e}")
 #         raise
 
-# def init_database_for_map(map_name):
+# def init_map_database_for_map(map_name):
 #     """Initialize database for a specific map with simplified schema"""
 #     try:
-#         conn = get_db_connection(map_name)
+#         conn = get_map_db_connection(map_name)
         
 #         # Create simplified tables with only essential columns
 #         tables = {
@@ -253,7 +286,7 @@
 # # ============================================================================
 
 # if ROS_AVAILABLE:
-#     # From app1.py - AMCL Pose Listener
+#     # From app1.py - AMCL Pose Listener with Database Storage
 #     class AmclPoseListener(Node):
 #         def __init__(self):
 #             super().__init__('amcl_pose_listener')
@@ -276,6 +309,7 @@
 #                 q = msg.pose.pose.orientation
 #                 yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
 #                                  1.0 - 2.0 * (q.y**2 + q.z**2))
+#                 yaw_degrees = math.degrees(yaw)
 
 #                 # Update global position
 #                 self.message_count += 1
@@ -283,14 +317,28 @@
 #                     latest_robot_position.update({
 #                         'x': x,
 #                         'y': y,
-#                         'yaw': math.degrees(yaw),
+#                         'yaw': yaw_degrees,
 #                         'timestamp': time.time(),
 #                         'message_count': self.message_count,
 #                         'header_stamp': f"{msg.header.stamp.sec}.{msg.header.stamp.nanosec}",
 #                         'status': 'success'
 #                     })
 
-#                 print(f"🎯 AMCL #{self.message_count:02d}: x={x:.3f}, y={y:.3f}, yaw={math.degrees(yaw):.1f}°")
+#                 # Save to database
+#                 with app.app_context():
+#                     position = RobotPosition(
+#                         x=x,
+#                         y=y,
+#                         yaw=yaw_degrees,
+#                         timestamp=datetime.utcnow(),
+#                         header_stamp=f"{msg.header.stamp.sec}.{msg.header.stamp.nanosec}",
+#                         message_count=self.message_count
+#                     )
+#                     db.session.add(position)
+#                     db.session.commit()
+#                     print(f"💾 Saved position #{self.message_count} to database (ID: {position.id})")
+
+#                 print(f"🎯 AMCL #{self.message_count:02d}: x={x:.3f}, y={y:.3f}, yaw={yaw_degrees:.1f}°")
                 
 #             except Exception as e:
 #                 print(f"❌ Error processing AMCL message: {e}")
@@ -380,6 +428,7 @@
 #             print("   - Camera on /depth_cam/depth/image_raw")
 #             print("   - Odometry on /odom")
 #             print("   - Battery on /ros_robot_controller/battery")
+#             print("💾 AMCL positions will be saved to database")
             
 #             # Create an executor to handle multiple nodes
 #             executor = rclpy.executors.MultiThreadedExecutor()
@@ -436,7 +485,8 @@
 #         'services': {
 #             'map_database': 'Available',
 #             'robot_position': 'Available' if ROS_AVAILABLE else 'Disabled (ROS2 not found)',
-#             'robot_status': 'Available' if ROS_AVAILABLE else 'Disabled (ROS2 not found)'
+#             'robot_status': 'Available' if ROS_AVAILABLE else 'Disabled (ROS2 not found)',
+#             'position_database': 'Available (robot_positions.db)'
 #         },
 #         'endpoints': {
 #             # Map Database Endpoints (from app.py)
@@ -452,14 +502,26 @@
 #             'position_health': 'GET /position_health',
             
 #             # Robot Status Endpoints (from topicstatus.py)
-#             'robot_status': 'GET /robot_status',
+#             'robot_status': 'GET /status',
 #             'system_health': 'GET /health',
 #             'debug': 'GET /debug',
-#             'topics': 'GET /topics'
+#             'topics': 'GET /topics',
+            
+#             # Database Endpoints (from app1.py database features)
+#             'positions': 'GET /positions',
+#             'positions_count': 'GET /positions/count',
+#             'positions_latest': 'GET /positions/latest',
+#             'positions_export': 'GET /positions/export',
+#             'positions_delete': 'DELETE /positions/delete/<id>',
+#             'positions_clear': 'DELETE /positions/clear'
 #         },
-#         'version': '3.0.0',
+#         'version': '4.0.0',
 #         'port': 5000,
-#         'ros_available': ROS_AVAILABLE
+#         'ros_available': ROS_AVAILABLE,
+#         'databases': {
+#             'robot_positions': 'robot_positions.db',
+#             'map_annotations': f'{MAP_DATABASE_DIR}/'
+#         }
 #     })
 
 # # ============================================================================
@@ -471,9 +533,9 @@
 #     """Health check endpoint (from app.py)"""
 #     try:
 #         # Test with default map
-#         db_path = get_database_path('default')
+#         db_path = get_map_database_path('default')
 #         if not os.path.exists(db_path):
-#             init_database_for_map('default')
+#             init_map_database_for_map('default')
         
 #         conn = sqlite3.connect(db_path)
 #         conn.execute('SELECT 1')
@@ -483,7 +545,8 @@
 #             'status': 'success',
 #             'message': 'API is healthy',
 #             'database_system': 'per-map databases',
-#             'database_directory': DATABASE_DIR,
+#             'database_directory': MAP_DATABASE_DIR,
+#             'position_database': 'robot_positions.db',
 #             'timestamp': datetime.now().isoformat()
 #         })
 #     except Exception as e:
@@ -506,9 +569,9 @@
 #         map_name = data.get('mapName', 'default')
         
 #         # Initialize database for this map if it doesn't exist
-#         db_path = get_database_path(map_name)
+#         db_path = get_map_database_path(map_name)
 #         if not os.path.exists(db_path):
-#             init_database_for_map(map_name)
+#             init_map_database_for_map(map_name)
         
 #         nodes = data.get('nodes', [])
 #         arrows = data.get('arrows', [])
@@ -516,7 +579,7 @@
         
 #         logger.info(f"💾 Saving {len(nodes)} nodes, {len(arrows)} arrows, {len(zones)} zones for map '{map_name}'")
         
-#         conn = get_db_connection(map_name)
+#         conn = get_map_db_connection(map_name)
 #         saved_counts = {
 #             'stations': 0,
 #             'docking_points': 0,
@@ -606,7 +669,7 @@
 #         map_name = request.args.get('map_name', 'default')
 #         logger.info(f"📂 Loading data for map '{map_name}'")
         
-#         db_path = get_database_path(map_name)
+#         db_path = get_map_database_path(map_name)
         
 #         # Check if database exists
 #         if not os.path.exists(db_path):
@@ -616,7 +679,7 @@
 #                 'suggestion': 'Save nodes first to create database'
 #             }), 404
         
-#         conn = get_db_connection(map_name)
+#         conn = get_map_db_connection(map_name)
         
 #         # Load nodes from all tables
 #         nodes = []
@@ -714,7 +777,7 @@
 #         map_name = request.args.get('map_name', 'default')
 #         logger.info(f"🗑️ Clearing data for map '{map_name}'")
         
-#         db_path = get_database_path(map_name)
+#         db_path = get_map_database_path(map_name)
         
 #         # Check if database exists
 #         if not os.path.exists(db_path):
@@ -724,7 +787,7 @@
 #                 'suggestion': 'Save nodes first to create database'
 #             }), 404
         
-#         conn = get_db_connection(map_name)
+#         conn = get_map_db_connection(map_name)
         
 #         tables_to_clear = ['stations', 'docking_points', 'waypoints', 'home_positions', 'charging_stations', 'arrows', 'zones']
 #         cleared_counts = {}
@@ -759,8 +822,8 @@
 # def list_maps():
 #     """List all available maps/databases (from app.py)"""
 #     try:
-#         if not os.path.exists(DATABASE_DIR):
-#             os.makedirs(DATABASE_DIR)
+#         if not os.path.exists(MAP_DATABASE_DIR):
+#             os.makedirs(MAP_DATABASE_DIR)
 #             return jsonify({
 #                 'status': 'success',
 #                 'maps': [],
@@ -769,12 +832,12 @@
 #             })
         
 #         # Get all .db files in the directory
-#         db_files = [f for f in os.listdir(DATABASE_DIR) if f.endswith('.db')]
+#         db_files = [f for f in os.listdir(MAP_DATABASE_DIR) if f.endswith('.db')]
         
 #         maps_info = []
 #         for db_file in db_files:
 #             map_name = os.path.splitext(db_file)[0].replace('_', ' ')
-#             db_path = os.path.join(DATABASE_DIR, db_file)
+#             db_path = os.path.join(MAP_DATABASE_DIR, db_file)
 #             db_size = os.path.getsize(db_path) / (1024 * 1024)  # MB
             
 #             # Get record counts
@@ -811,7 +874,7 @@
 #             'status': 'success',
 #             'maps': maps_info,
 #             'total': len(maps_info),
-#             'database_directory': DATABASE_DIR,
+#             'database_directory': MAP_DATABASE_DIR,
 #             'timestamp': datetime.now().isoformat()
 #         })
         
@@ -834,7 +897,7 @@
 #                 'message': 'Map name is required'
 #             }), 400
         
-#         db_path = get_database_path(map_name)
+#         db_path = get_map_database_path(map_name)
         
 #         if not os.path.exists(db_path):
 #             return jsonify({
@@ -861,7 +924,7 @@
 #         }), 500
 
 # # ============================================================================
-# # Robot Position Endpoints (from app1.py)
+# # Robot Position Endpoints (from app1.py) WITH DATABASE FEATURES
 # # ============================================================================
 
 # @app.route('/robot_position', methods=['GET'])
@@ -899,7 +962,8 @@
 #             'status': 'success',
 #             'data': latest_robot_position,
 #             'timestamp': time.time(),
-#             'message': f'Received {latest_robot_position["message_count"]} AMCL messages'
+#             'message': f'Received {latest_robot_position["message_count"]} AMCL messages',
+#             'database_count': RobotPosition.query.count()
 #         })
 
 # @app.route('/position_status', methods=['GET'])
@@ -913,17 +977,32 @@
 #             'last_position': {'x': 0.0, 'y': 0.0, 'yaw': 0.0},
 #             'last_update_age': 'Never',
 #             'topic': '/amcl_pose',
-#             'message': 'ROS2 not available'
+#             'message': 'ROS2 not available',
+#             'database_count': RobotPosition.query.count()
 #         })
     
 #     with amcl_position_lock:
+#         # Get database info
+#         try:
+#             db_count = RobotPosition.query.count()
+#             latest_db = RobotPosition.query.order_by(RobotPosition.timestamp.desc()).first()
+#             db_status = 'connected'
+#         except Exception as e:
+#             db_count = 0
+#             latest_db = None
+#             db_status = f'error: {str(e)}'
+        
 #         status_info = {
 #             'ros_connected': True,
 #             'api_ready': True,
+#             'database_status': db_status,
+#             'database_count': db_count,
 #             'messages_received': latest_robot_position['message_count'],
 #             'last_position': latest_robot_position,
+#             'last_db_position': latest_db.to_dict() if latest_db else None,
 #             'last_update_age': time.time() - latest_robot_position['timestamp'] if latest_robot_position['timestamp'] > 0 else 'Never',
-#             'topic': '/amcl_pose'
+#             'topic': '/amcl_pose',
+#             'database_file': 'robot_positions.db'
 #         }
     
 #     return jsonify(status_info)
@@ -931,11 +1010,20 @@
 # @app.route('/position_health', methods=['GET'])
 # def position_health_check():
 #     """Health check endpoint (from app1.py)"""
+#     try:
+#         db_count = RobotPosition.query.count()
+#         db_healthy = True
+#     except:
+#         db_count = 0
+#         db_healthy = False
+    
 #     return jsonify({
 #         'status': 'healthy' if ROS_AVAILABLE else 'disabled',
 #         'service': 'ROS2 AMCL Position API',
 #         'timestamp': time.time(),
-#         'ros_available': ROS_AVAILABLE
+#         'ros_available': ROS_AVAILABLE,
+#         'database_available': db_healthy,
+#         'database_count': db_count
 #     })
 
 # # ============================================================================
@@ -943,7 +1031,7 @@
 # # ============================================================================
 
 # @app.route("/status", methods=['GET'])
-# def get_status():
+# def get_robot_status():
 #     """Get robot system status (from topicstatus.py - original /status endpoint)"""
 #     client_ip = request.remote_addr
 #     if not is_allowed_client(client_ip):
@@ -969,18 +1057,165 @@
     
 #     return jsonify(snapshot)
 
+# # ============================================================================
+# # Database Endpoints for Stored Positions (from app1.py database features)
+# # ============================================================================
+
+# @app.route('/positions', methods=['GET'])
+# def get_all_positions():
+#     """Get all stored positions from database"""
+#     try:
+#         positions = RobotPosition.query.order_by(RobotPosition.timestamp.desc()).all()
+#         return jsonify({
+#             'status': 'success',
+#             'count': len(positions),
+#             'positions': [pos.to_dict() for pos in positions]
+#         })
+#     except Exception as e:
+#         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# @app.route('/positions/<int:id>', methods=['GET'])
+# def get_position_by_id(id):
+#     """Get specific position by ID"""
+#     try:
+#         position = RobotPosition.query.get_or_404(id)
+#         return jsonify({
+#             'status': 'success',
+#             'position': position.to_dict()
+#         })
+#     except Exception as e:
+#         return jsonify({'status': 'error', 'message': str(e)}), 404
+
+# @app.route('/positions/latest', methods=['GET'])
+# def get_latest_positions():
+#     """Get latest N positions (default: 100)"""
+#     try:
+#         limit = request.args.get('limit', default=100, type=int)
+#         positions = RobotPosition.query.order_by(
+#             RobotPosition.timestamp.desc()
+#         ).limit(limit).all()
+        
+#         return jsonify({
+#             'status': 'success',
+#             'limit': limit,
+#             'count': len(positions),
+#             'positions': [pos.to_dict() for pos in positions]
+#         })
+#     except Exception as e:
+#         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# @app.route('/positions/count', methods=['GET'])
+# def get_positions_count():
+#     """Get count of stored positions"""
+#     try:
+#         count = RobotPosition.query.count()
+#         return jsonify({
+#             'status': 'success',
+#             'count': count,
+#             'database': 'robot_positions.db'
+#         })
+#     except Exception as e:
+#         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# @app.route('/positions/delete/<int:id>', methods=['DELETE'])
+# def delete_position(id):
+#     """Delete position by ID"""
+#     try:
+#         position = RobotPosition.query.get_or_404(id)
+#         db.session.delete(position)
+#         db.session.commit()
+#         return jsonify({
+#             'status': 'success',
+#             'message': f'Position {id} deleted successfully'
+#         })
+#     except Exception as e:
+#         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# @app.route('/positions/clear', methods=['DELETE'])
+# def clear_all_positions():
+#     """Clear all positions from database"""
+#     try:
+#         if request.args.get('confirm') != 'true':
+#             return jsonify({
+#                 'status': 'warning',
+#                 'message': 'Add ?confirm=true to confirm deletion'
+#             }), 400
+        
+#         count = RobotPosition.query.delete()
+#         db.session.commit()
+#         return jsonify({
+#             'status': 'success',
+#             'message': f'Cleared {count} positions from database'
+#         })
+#     except Exception as e:
+#         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# @app.route('/positions/export', methods=['GET'])
+# def export_positions():
+#     """Export positions as CSV or JSON"""
+#     try:
+#         format_type = request.args.get('format', 'json')
+#         positions = RobotPosition.query.order_by(RobotPosition.timestamp.asc()).all()
+        
+#         if format_type == 'csv':
+#             import csv
+#             from io import StringIO
+            
+#             output = StringIO()
+#             writer = csv.writer(output)
+#             writer.writerow(['id', 'x', 'y', 'yaw', 'timestamp', 'header_stamp', 'message_count', 'created_at'])
+            
+#             for pos in positions:
+#                 writer.writerow([
+#                     pos.id,
+#                     pos.x,
+#                     pos.y,
+#                     pos.yaw,
+#                     pos.timestamp.isoformat() if pos.timestamp else '',
+#                     pos.header_stamp,
+#                     pos.message_count,
+#                     pos.created_at.isoformat() if pos.created_at else ''
+#                 ])
+            
+#             response = app.response_class(
+#                 response=output.getvalue(),
+#                 status=200,
+#                 mimetype='text/csv',
+#                 headers={'Content-Disposition': 'attachment; filename=robot_positions.csv'}
+#             )
+#             return response
+        
+#         else:  # JSON
+#             return jsonify({
+#                 'status': 'success',
+#                 'count': len(positions),
+#                 'positions': [pos.to_dict() for pos in positions]
+#             })
+            
+#     except Exception as e:
+#         return jsonify({'status': 'error', 'message': str(e)}), 500
+
 # @app.route('/debug', methods=['GET'])
 # def debug_info():
 #     """Debug endpoint to see what's happening (from app1.py)"""
+#     try:
+#         db_count = RobotPosition.query.count()
+#         latest_10 = RobotPosition.query.order_by(RobotPosition.timestamp.desc()).limit(10).all()
+#     except Exception as e:
+#         db_count = 0
+#         latest_10 = []
+    
 #     debug_data = {
 #         'latest_position': latest_robot_position,
+#         'database_count': db_count,
+#         'recent_positions': [pos.to_dict() for pos in latest_10],
 #         'system_time': time.time(),
 #         'ros_available': ROS_AVAILABLE,
 #         'instructions': [
 #             '1. Make sure ROS2 environment is sourced',
 #             '2. Play ROS2 bag: ros2 bag play my_amcl_bag_0.db3',
 #             '3. Check if /amcl_pose topic has data: ros2 topic echo /amcl_pose',
-#             '4. Verify Flask app is receiving data'
+#             '4. Positions are automatically saved to database'
 #         ]
 #     }
     
@@ -1014,7 +1249,8 @@
 #         'available_endpoints': [
 #             '/', '/health', '/save-nodes', '/load-nodes', '/clear-nodes',
 #             '/list-maps', '/delete-map', '/robot_position', '/position_status',
-#             '/position_health', '/status', '/debug', '/topics'
+#             '/position_health', '/status', '/debug', '/topics',
+#             '/positions', '/positions/count', '/positions/latest', '/positions/export'
 #         ]
 #     }), 404
 
@@ -1036,21 +1272,27 @@
 #     print("="*70)
     
 #     # From app.py
-#     print("📁 Database system: Per-map databases")
-#     print(f"📂 Database directory: {os.path.abspath(DATABASE_DIR)}")
-#     print("📊 Simplified schema: map_name, node_type, x, y, z")
+#     print("📁 Map Database system: Per-map databases")
+#     print(f"📂 Map Database directory: {os.path.abspath(MAP_DATABASE_DIR)}")
+#     print("📊 Map Database schema: map_name, node_type, x, y, z")
     
 #     # From app1.py
 #     print(f"🤖 ROS2 Available: {'✅ YES' if ROS_AVAILABLE else '❌ NO'}")
+    
+#     # Database initialization for robot positions
+#     with app.app_context():
+#         db.create_all()
+#         count = RobotPosition.query.count()
+#         print(f"💾 Robot Position Database: robot_positions.db ({count} positions already stored)")
     
 #     # From topicstatus.py
 #     print(f"🌐 API Port: 5000")
 #     print("="*70)
     
-#     # Create database directory if it doesn't exist
-#     if not os.path.exists(DATABASE_DIR):
-#         os.makedirs(DATABASE_DIR)
-#         print(f"📁 Created database directory: {DATABASE_DIR}")
+#     # Create map database directory if it doesn't exist
+#     if not os.path.exists(MAP_DATABASE_DIR):
+#         os.makedirs(MAP_DATABASE_DIR)
+#         print(f"📁 Created map database directory: {MAP_DATABASE_DIR}")
     
 #     # Start ROS2 threads if available
 #     if ROS_AVAILABLE:
@@ -1066,15 +1308,15 @@
 #         status_thread.start()
         
 #         print("✅ ROS2 integration started")
+#         print("💾 AMCL positions will be automatically saved to database")
         
-#         # From app1.py
 #         print("\n🎯 Next Steps:")
 #         print("   1. Keep this Flask app running")
 #         print("   2. Open a NEW terminal")
 #         print("   3. Source your ROS2 environment")
 #         print("   4. Play your ROS2 bag: ros2 bag play my_amcl_bag_0.db3")
 #         print("   5. Watch for position updates above!")
-#         print("   6. Open your React frontend to see the robot move")
+#         print("   6. Positions are automatically saved to database")
 #     else:
 #         print("⚠️ ROS2 not available - robot position/status features disabled")
 #         print("💡 Install ROS2 Python bindings to enable robot tracking")
@@ -1092,15 +1334,23 @@
 #     print("   http://localhost:5000/list-maps     - GET: List available maps")
 #     print("   http://localhost:5000/delete-map    - DELETE: Delete a map")
     
-#     print("\n🎯 ROBOT POSITION API (from app1.py):")
+#     print("\n🎯 ROBOT POSITION API with DATABASE (from app1.py):")
 #     print("   http://localhost:5000/robot_position    - GET: Current robot position")
 #     print("   http://localhost:5000/position_status   - GET: Position connection status")
 #     print("   http://localhost:5000/position_health   - GET: Position health check")
+#     print("   http://localhost:5000/positions         - GET: All stored positions")
+#     print("   http://localhost:5000/positions/count   - GET: Count of positions")
+#     print("   http://localhost:5000/positions/latest  - GET: Latest positions")
+#     print("   http://localhost:5000/positions/export  - GET: Export as CSV/JSON")
     
 #     print("\n🤖 ROBOT STATUS API (from topicstatus.py):")
 #     print("   http://localhost:5000/status        - GET: Robot system status")
 #     print("   http://localhost:5000/debug         - GET: Debug information")
 #     print("   http://localhost:5000/topics        - GET: List ROS2 topics")
+    
+#     print("\n💾 DATABASES:")
+#     print("   - Map annotations: map_databases/*.db")
+#     print("   - Robot positions: robot_positions.db")
     
 #     print("\n✅ API ready!")
 #     print("\n🌐 Starting Flask server...")
@@ -1112,7 +1362,6 @@
 #     app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False)
 
 
-
 #!/usr/bin/env python3
 """
 UNIFIED AMR SYSTEM API - PORT 5000
@@ -1122,7 +1371,7 @@ Combines all three applications into one:
 2. ROS2 AMCL Position Reader (app1.py) - Port 5001 
 3. ROS2 Robot Status Monitor (topicstatus.py) - Port 5002
 
-WITH DATABASE STORAGE FOR AMCL POSITIONS
+WITH DATABASE STORAGE FOR AMCL POSITIONS AND SPEED MONITORING
 
 All running on single port: 5000
 """
@@ -1165,6 +1414,9 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+
 
 # Create Flask app
 app = Flask(__name__)
@@ -1240,13 +1492,22 @@ robot_status_data = {
     "battery": "N/A",
     "battery_voltage": 0.0,
     "robot_position": {"x": 0.0, "y": 0.0},
-    "error_status": "NONE"
+    "error_status": "NONE",
+    "speed": {
+        "linear": 0.0,
+        "angular": 0.0
+    },
+    "odometry": {
+        "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+        "orientation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 0.0}
+    }
 }
 
 # Last message timestamps (from topicstatus.py)
 last_msg_time = {
     "pose": 0.0, "imu": 0.0, "lidar": 0.0,
     "camera": 0.0, "motor": 0.0, "battery": 0.0,
+    "odom_raw": 0.0
 }
 
 # ============================================================================
@@ -1458,7 +1719,7 @@ if ROS_AVAILABLE:
                 with amcl_position_lock:
                     latest_robot_position['status'] = 'error'
 
-    # From topicstatus.py - Robot Status Monitor
+    # From topicstatus.py - Robot Status Monitor WITH ODOM_RAW
     class RobotStatusMonitor(Node):
         def __init__(self):
             super().__init__("robot_status_monitor")
@@ -1469,10 +1730,12 @@ if ROS_AVAILABLE:
             self.create_subscription(Imu, "/imu", self.imu_callback, 10)
             self.create_subscription(LaserScan, "/scan_raw", self.lidar_callback, 10)
             self.create_subscription(Image, "/depth_cam/depth/image_raw", self.camera_callback, 10)
+            self.create_subscription(Odometry, "/odom_raw", self.odom_raw_callback, 10)  # For speed monitoring
             self.create_subscription(Odometry, "/odom", self.motor_callback, 10)
             self.create_subscription(UInt16, "/ros_robot_controller/battery", self.battery_callback, 10)
 
             self.get_logger().info("RobotStatusMonitor started ✔")
+            self.get_logger().info("📡 Listening for /odom_raw topic for speed monitoring")
 
         def pose_callback(self, msg: PoseWithCovarianceStamped):
             now = time.time()
@@ -1505,6 +1768,36 @@ if ROS_AVAILABLE:
             last_msg_time["camera"] = time.time()
             with robot_status_lock:
                 robot_status_data["camera_status"] = "OK"
+
+        def odom_raw_callback(self, msg: Odometry):
+            """Callback for /odom_raw topic - captures speed data"""
+            last_msg_time["odom_raw"] = time.time()
+            linear = msg.twist.twist.linear.x
+            angular = msg.twist.twist.angular.z
+            
+            with robot_status_lock:
+                # Update speed data
+                robot_status_data["speed"]["linear"] = round(float(linear), 3)
+                robot_status_data["speed"]["angular"] = round(float(angular), 3)
+                
+                # Update odometry data
+                robot_status_data["odometry"]["position"] = {
+                    "x": float(msg.pose.pose.position.x),
+                    "y": float(msg.pose.pose.position.y),
+                    "z": float(msg.pose.pose.position.z)
+                }
+                robot_status_data["odometry"]["orientation"] = {
+                    "x": float(msg.pose.pose.orientation.x),
+                    "y": float(msg.pose.pose.orientation.y),
+                    "z": float(msg.pose.pose.orientation.z),
+                    "w": float(msg.pose.pose.orientation.w)
+                }
+                
+                # Determine robot status based on speed
+                if abs(linear) > 0.01 or abs(angular) > 0.01:
+                    robot_status_data["robot_status"] = "RUNNING"
+                else:
+                    robot_status_data["robot_status"] = "IDLE"
 
         def motor_callback(self, msg: Odometry):
             last_msg_time["motor"] = time.time()
@@ -1539,6 +1832,7 @@ if ROS_AVAILABLE:
             print("   - IMU on /imu")
             print("   - Lidar on /scan_raw")
             print("   - Camera on /depth_cam/depth/image_raw")
+            print("   - Odometry RAW on /odom_raw (for speed)")
             print("   - Odometry on /odom")
             print("   - Battery on /ros_robot_controller/battery")
             print("💾 AMCL positions will be saved to database")
@@ -1576,13 +1870,28 @@ if ROS_AVAILABLE:
                 # If motors not OK, set robot to IDLE
                 if robot_status_data.get("motor_status") != "OK":
                     robot_status_data["robot_status"] = "IDLE"
+                    
+                # Check odom_raw timeout for speed monitoring
+                odom_raw_timeout = 1.0
+                last_odom_raw = last_msg_time.get("odom_raw", 0.0)
+                if now - last_odom_raw > odom_raw_timeout:
+                    robot_status_data["speed"]["linear"] = 0.0
+                    robot_status_data["speed"]["angular"] = 0.0
+                    
             time.sleep(0.1)
 
     def status_printer():
         """Print robot status periodically (from topicstatus.py)"""
         while True:
             with robot_status_lock:
-                print("🤖 ROBOT STATUS:", robot_status_data)
+                status_copy = dict(robot_status_data)
+                speed_info = f"Speed: L={status_copy['speed']['linear']:.3f}, A={status_copy['speed']['angular']:.3f}"
+                print(f"🤖 STATUS: {status_copy['robot_status']} | {speed_info} | "
+                      f"IMU: {status_copy['imu_status']} | "
+                      f"LIDAR: {status_copy['lidar_status']} | "
+                      f"CAM: {status_copy['camera_status']} | "
+                      f"MOTOR: {status_copy['motor_status']} | "
+                      f"BATT: {status_copy['battery']}%")
             time.sleep(1)
 
 # ============================================================================
@@ -1599,7 +1908,8 @@ def index():
             'map_database': 'Available',
             'robot_position': 'Available' if ROS_AVAILABLE else 'Disabled (ROS2 not found)',
             'robot_status': 'Available' if ROS_AVAILABLE else 'Disabled (ROS2 not found)',
-            'position_database': 'Available (robot_positions.db)'
+            'position_database': 'Available (robot_positions.db)',
+            'speed_monitoring': 'Available' if ROS_AVAILABLE else 'Disabled (ROS2 not found)'
         },
         'endpoints': {
             # Map Database Endpoints (from app.py)
@@ -1614,8 +1924,10 @@ def index():
             'position_status': 'GET /position_status',
             'position_health': 'GET /position_health',
             
-            # Robot Status Endpoints (from topicstatus.py)
+            # Robot Status Endpoints (from topicstatus.py) - WITH SPEED
             'robot_status': 'GET /status',
+            'speed_data': 'GET /speed',
+            'odometry_data': 'GET /odometry',
             'system_health': 'GET /health',
             'debug': 'GET /debug',
             'topics': 'GET /topics',
@@ -1628,13 +1940,14 @@ def index():
             'positions_delete': 'DELETE /positions/delete/<id>',
             'positions_clear': 'DELETE /positions/clear'
         },
-        'version': '4.0.0',
+        'version': '4.1.0',
         'port': 5000,
         'ros_available': ROS_AVAILABLE,
         'databases': {
             'robot_positions': 'robot_positions.db',
             'map_annotations': f'{MAP_DATABASE_DIR}/'
-        }
+        },
+        'speed_topic': '/odom_raw' if ROS_AVAILABLE else 'Not available'
     })
 
 # ============================================================================
@@ -2140,7 +2453,7 @@ def position_health_check():
     })
 
 # ============================================================================
-# Robot Status Endpoints (from topicstatus.py)
+# Robot Status Endpoints (from topicstatus.py) - WITH SPEED DATA
 # ============================================================================
 
 @app.route("/status", methods=['GET'])
@@ -2158,7 +2471,8 @@ def get_robot_status():
             "battery": "N/A",
             "battery_voltage": 0.0,
             "robot_position": None,
-            "error_status": "UNAUTHORIZED_NETWORK"
+            "error_status": "UNAUTHORIZED_NETWORK",
+            "speed": {"linear": 0.0, "angular": 0.0}
         })
 
     # Authorized — return current snapshot
@@ -2167,8 +2481,62 @@ def get_robot_status():
     
     snapshot['timestamp'] = datetime.now().isoformat()
     snapshot['ros_available'] = ROS_AVAILABLE
+    snapshot['speed_topic'] = '/odom_raw' if ROS_AVAILABLE else 'Not available'
     
     return jsonify(snapshot)
+
+@app.route("/speed", methods=['GET'])
+def get_speed_data():
+    """Get speed data from /odom_raw topic"""
+    if not ROS_AVAILABLE:
+        return jsonify({
+            "status": "error",
+            "message": "ROS2 not available",
+            "speed": {"linear": 0.0, "angular": 0.0},
+            "timestamp": datetime.now().isoformat()
+        })
+    
+    with robot_status_lock:
+        speed_data = dict(robot_status_data["speed"])
+        odom_raw_age = time.time() - last_msg_time.get("odom_raw", 0)
+    
+    return jsonify({
+        "status": "success",
+        "topic": "/odom_raw",
+        "speed": speed_data,
+        "data_age_seconds": round(odom_raw_age, 3),
+        "data_fresh": odom_raw_age < 1.0,
+        "timestamp": datetime.now().isoformat()
+    })
+
+@app.route("/odometry", methods=['GET'])
+def get_odometry_data():
+    """Get full odometry data from /odom_raw topic"""
+    if not ROS_AVAILABLE:
+        return jsonify({
+            "status": "error",
+            "message": "ROS2 not available",
+            "odometry": {
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 0.0}
+            },
+            "timestamp": datetime.now().isoformat()
+        })
+    
+    with robot_status_lock:
+        odom_data = dict(robot_status_data["odometry"])
+        speed_data = dict(robot_status_data["speed"])
+        odom_raw_age = time.time() - last_msg_time.get("odom_raw", 0)
+    
+    return jsonify({
+        "status": "success",
+        "topic": "/odom_raw",
+        "position": odom_data["position"],
+        "orientation": odom_data["orientation"],
+        "speed": speed_data,
+        "data_age_seconds": round(odom_raw_age, 3),
+        "timestamp": datetime.now().isoformat()
+    })
 
 # ============================================================================
 # Database Endpoints for Stored Positions (from app1.py database features)
@@ -2318,17 +2686,26 @@ def debug_info():
         db_count = 0
         latest_10 = []
     
+    with robot_status_lock:
+        current_speed = dict(robot_status_data["speed"])
+        current_odom = dict(robot_status_data["odometry"])
+    
     debug_data = {
         'latest_position': latest_robot_position,
         'database_count': db_count,
         'recent_positions': [pos.to_dict() for pos in latest_10],
         'system_time': time.time(),
         'ros_available': ROS_AVAILABLE,
+        'speed_data': current_speed,
+        'odometry_data': current_odom,
+        'last_message_times': {k: round(time.time() - v, 3) for k, v in last_msg_time.items() if v > 0},
+        'odom_raw_available': last_msg_time.get("odom_raw", 0) > 0,
         'instructions': [
             '1. Make sure ROS2 environment is sourced',
             '2. Play ROS2 bag: ros2 bag play my_amcl_bag_0.db3',
             '3. Check if /amcl_pose topic has data: ros2 topic echo /amcl_pose',
-            '4. Positions are automatically saved to database'
+            '4. Check if /odom_raw topic has data: ros2 topic echo /odom_raw',
+            '5. Positions are automatically saved to database'
         ]
     }
     
@@ -2343,9 +2720,21 @@ def list_topics():
     try:
         result = subprocess.run(['ros2', 'topic', 'list'], capture_output=True, text=True)
         topics = result.stdout.strip().split('\n') if result.stdout else []
+        
+        # Check for specific topics
+        topic_checks = {
+            '/amcl_pose': '/amcl_pose' in topics,
+            '/odom_raw': '/odom_raw' in topics,
+            '/imu': '/imu' in topics,
+            '/scan_raw': '/scan_raw' in topics,
+            '/odom': '/odom' in topics,
+            '/ros_robot_controller/battery': '/ros_robot_controller/battery' in topics
+        }
+        
         return jsonify({
             'topics': topics,
-            'amcl_pose_available': '/amcl_pose' in topics
+            'topic_checks': topic_checks,
+            'status': 'Missing required topics' if not all(topic_checks.values()) else 'All topics available'
         })
     except Exception as e:
         return jsonify({'error': str(e), 'topics': []})
@@ -2362,8 +2751,9 @@ def not_found(error):
         'available_endpoints': [
             '/', '/health', '/save-nodes', '/load-nodes', '/clear-nodes',
             '/list-maps', '/delete-map', '/robot_position', '/position_status',
-            '/position_health', '/status', '/debug', '/topics',
-            '/positions', '/positions/count', '/positions/latest', '/positions/export'
+            '/position_health', '/status', '/speed', '/odometry',
+            '/debug', '/topics', '/positions', '/positions/count', 
+            '/positions/latest', '/positions/export'
         ]
     }), 404
 
@@ -2398,6 +2788,9 @@ if __name__ == '__main__':
         count = RobotPosition.query.count()
         print(f"💾 Robot Position Database: robot_positions.db ({count} positions already stored)")
     
+    # Speed monitoring info
+    print(f"📈 Speed Monitoring via /odom_raw: {'✅ Enabled' if ROS_AVAILABLE else '❌ Disabled'}")
+    
     # From topicstatus.py
     print(f"🌐 API Port: 5000")
     print("="*70)
@@ -2421,6 +2814,7 @@ if __name__ == '__main__':
         status_thread.start()
         
         print("✅ ROS2 integration started")
+        print("📈 Speed monitoring via /odom_raw enabled")
         print("💾 AMCL positions will be automatically saved to database")
         
         print("\n🎯 Next Steps:")
@@ -2428,10 +2822,10 @@ if __name__ == '__main__':
         print("   2. Open a NEW terminal")
         print("   3. Source your ROS2 environment")
         print("   4. Play your ROS2 bag: ros2 bag play my_amcl_bag_0.db3")
-        print("   5. Watch for position updates above!")
+        print("   5. Watch for position and speed updates above!")
         print("   6. Positions are automatically saved to database")
     else:
-        print("⚠️ ROS2 not available - robot position/status features disabled")
+        print("⚠️ ROS2 not available - robot position/status/speed features disabled")
         print("💡 Install ROS2 Python bindings to enable robot tracking")
     
     # Print combined endpoint information
@@ -2456,8 +2850,10 @@ if __name__ == '__main__':
     print("   http://localhost:5000/positions/latest  - GET: Latest positions")
     print("   http://localhost:5000/positions/export  - GET: Export as CSV/JSON")
     
-    print("\n🤖 ROBOT STATUS API (from topicstatus.py):")
-    print("   http://localhost:5000/status        - GET: Robot system status")
+    print("\n🤖 ROBOT STATUS API with SPEED MONITORING (from topicstatus.py):")
+    print("   http://localhost:5000/status        - GET: Full robot system status")
+    print("   http://localhost:5000/speed         - GET: Current speed (linear & angular)")
+    print("   http://localhost:5000/odometry      - GET: Full odometry data")
     print("   http://localhost:5000/debug         - GET: Debug information")
     print("   http://localhost:5000/topics        - GET: List ROS2 topics")
     

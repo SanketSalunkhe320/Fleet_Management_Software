@@ -57,8 +57,15 @@ const defaultTranslations = {
   idle: "Idle",
   maintenance: "Maintenance",
 
+  // Table header translations
+  amr_id: "AMR ID",
+  status: "Status",
+  battery: "Battery",
+  motor_temp: "Motor Temp",
+  speed: "Speed",
+  error: "Error",
+
   // Health translations
-  health_check: "Health Check",
   health: {
     amr: "AMR",
     imu: "IMU",
@@ -126,8 +133,15 @@ const mrTranslations = {
   idle: "निष्क्रिय",
   maintenance: "देखभाल",
 
+  // Table header translations
+  amr_id: "एएमआर आयडी",
+  status: "स्थिती",
+  battery: "बॅटरी",
+  motor_temp: "मोटर तापमान",
+  speed: "गती",
+  error: "त्रुटी",
+
   // Health translations
-  health_check: "आरोग्य तपासणी",
   health: {
     amr: "एएमआर",
     imu: "आयएमयू",
@@ -195,8 +209,15 @@ const hiTranslations = {
   idle: "निष्क्रिय",
   maintenance: "रखरखाव",
 
+  // Table header translations
+  amr_id: "एएमआर आईडी",
+  status: "स्थिति",
+  battery: "बैटरी",
+  motor_temp: "मोटर तापमान",
+  speed: "गति",
+  error: "त्रुटि",
+
   // Health translations
-  health_check: "स्वास्थ्य जांच",
   health: {
     amr: "एएमआर",
     imu: "आईएमयू",
@@ -233,26 +254,21 @@ export const LanguageProvider = ({ children }) => {
     localStorage.setItem('language', language);
   }, [language]);
 
-  // Updated t() function that supports nested keys with dot notation
   const t = (key) => {
     if (!key) return '';
     
-    // Split by dots to handle nested keys
     const keys = key.split('.');
     let result = translationsData;
     
-    // Traverse through the nested object
     for (const k of keys) {
       if (result && typeof result === 'object' && k in result) {
         result = result[k];
       } else {
-        // If key not found, return the original key
         console.warn(`Translation not found for key: "${key}"`);
         return key;
       }
     }
     
-    // Return the final value or the key if value is undefined
     return result || key;
   };
 
