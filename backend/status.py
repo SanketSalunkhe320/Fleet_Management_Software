@@ -1362,6 +1362,7 @@
 #     app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False)
 
 
+
 #!/usr/bin/env python3
 """
 UNIFIED AMR SYSTEM API - PORT 5000
@@ -1370,6 +1371,7 @@ Combines all three applications into one:
 1. Map Database API (app.py) - Port 5000
 2. ROS2 AMCL Position Reader (app1.py) - Port 5001 
 3. ROS2 Robot Status Monitor (topicstatus.py) - Port 5002
+4. WiFi Status Monitor (wifi_backend.py) - Added WiFi monitoring
 
 WITH DATABASE STORAGE FOR AMCL POSITIONS AND SPEED MONITORING
 
@@ -1390,6 +1392,9 @@ import threading
 import time
 import ipaddress
 import subprocess
+import platform
+import socket
+import psutil
 
 # ROS2 imports (optional - will gracefully degrade if not available)
 ROS_AVAILABLE = False
@@ -1414,9 +1419,6 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-
-
 
 # Create Flask app
 app = Flask(__name__)
@@ -1466,6 +1468,9 @@ FAULT_TIMEOUTS = {
     "battery": 3.0,
 }
 
+# WiFi monitoring interval
+WIFI_UPDATE_INTERVAL = 2  # seconds
+
 # ============================================================================
 # Global Data Stores (Thread-safe)
 # ============================================================================
@@ -1503,12 +1508,269 @@ robot_status_data = {
     }
 }
 
+# WiFi Status data (new)
+wifi_status_lock = threading.Lock()
+wifi_status_data = {
+    "connected": False,
+    "ssid": "Not Connected",
+    "signal_strength": 0,
+    "ip_address": "N/A",
+    "mac_address": "N/A",
+    "connection_type": "N/A",
+    "bitrate": "N/A",
+    "frequency": "N/A",
+    "tx_power": "N/A",
+    "interface": "wlan0",
+    "noise_level": 0,
+    "link_quality": 0
+}
+
 # Last message timestamps (from topicstatus.py)
 last_msg_time = {
     "pose": 0.0, "imu": 0.0, "lidar": 0.0,
     "camera": 0.0, "motor": 0.0, "battery": 0.0,
     "odom_raw": 0.0
 }
+
+# ============================================================================
+# WiFi Monitoring Class
+# ============================================================================
+
+class WiFiMonitor:
+    def __init__(self):
+        self.system = platform.system().lower()
+    
+    def get_wifi_status(self):
+        """Get current WiFi status based on operating system"""
+        if self.system == "linux":
+            return self.get_wifi_linux()
+        elif self.system == "windows":
+            return self.get_wifi_windows()
+        else:
+            # macOS or other - return mock data for testing
+            return self.get_mock_wifi_data()
+    
+    def get_wifi_linux(self):
+        """Get WiFi details for Linux systems"""
+        details = {
+            'connected': False,
+            'ssid': 'Not Connected',
+            'signal_strength': 0,
+            'ip_address': self.get_ip_address(),
+            'mac_address': self.get_mac_address_linux(),
+            'connection_type': 'N/A',
+            'bitrate': 'N/A',
+            'frequency': 'N/A',
+            'tx_power': 'N/A',
+            'interface': 'wlan0',
+            'noise_level': 0,
+            'link_quality': 0
+        }
+        
+        try:
+            # Try using iwconfig first
+            result = subprocess.run(['iwconfig', 'wlan0'], capture_output=True, text=True, timeout=2)
+            
+            if result.returncode == 0:
+                output = result.stdout
+                
+                # Parse SSID
+                ssid_match = re.search(r'ESSID:"([^"]+)"', output)
+                if ssid_match:
+                    ssid = ssid_match.group(1)
+                    if ssid != 'off/any':
+                        details['ssid'] = ssid
+                        details['connected'] = True
+                
+                # Parse signal strength
+                signal_match = re.search(r'Signal level=(-?\d+) dBm', output)
+                if signal_match:
+                    signal_dbm = int(signal_match.group(1))
+                    # Convert dBm to percentage (very rough approximation)
+                    # -30 dBm = 100%, -90 dBm = 0%
+                    signal_percent = max(0, min(100, ((signal_dbm + 90) * 100) // 60))
+                    details['signal_strength'] = signal_percent
+                
+                # Parse link quality
+                quality_match = re.search(r'Link Quality=(\d+)/(\d+)', output)
+                if quality_match:
+                    quality = int(quality_match.group(1))
+                    max_quality = int(quality_match.group(2))
+                    details['link_quality'] = int((quality / max_quality) * 100) if max_quality > 0 else 0
+                
+                # Parse bitrate
+                bitrate_match = re.search(r'Bit Rate[:=](\d+(?:\.\d+)?) (Mb/s|MB/s)', output)
+                if bitrate_match:
+                    details['bitrate'] = f"{bitrate_match.group(1)} {bitrate_match.group(2)}"
+                
+                # Parse frequency
+                freq_match = re.search(r'Frequency[:=](\d+(?:\.\d+)?) GHz', output)
+                if freq_match:
+                    details['frequency'] = f"{freq_match.group(1)} GHz"
+                
+                # Parse TX power
+                tx_match = re.search(r'Tx-Power[:=](\d+) dBm', output)
+                if tx_match:
+                    details['tx_power'] = f"{tx_match.group(1)} dBm"
+                
+                # Parse noise level
+                noise_match = re.search(r'Noise level=(-?\d+) dBm', output)
+                if noise_match:
+                    details['noise_level'] = int(noise_match.group(1))
+            
+            # If iwconfig fails, try nmcli (NetworkManager)
+            else:
+                result = subprocess.run(['nmcli', '-t', '-f', 'ACTIVE,SSID,SIGNAL', 'device', 'wifi'], 
+                                      capture_output=True, text=True, timeout=2)
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split('\n')
+                    for line in lines:
+                        if line.startswith('yes:'):
+                            parts = line.split(':')
+                            if len(parts) >= 3:
+                                details['connected'] = True
+                                details['ssid'] = parts[1]
+                                details['signal_strength'] = int(parts[2])
+                                break
+            
+            # Determine connection type based on frequency
+            if 'frequency' in details and details['frequency'] != 'N/A':
+                freq = float(details['frequency'].split()[0])
+                if freq >= 5.0:
+                    details['connection_type'] = '802.11ac/ax (5 GHz)'
+                else:
+                    details['connection_type'] = '802.11b/g/n (2.4 GHz)'
+            
+        except subprocess.TimeoutExpired:
+            logger.warning("WiFi command timed out")
+        except Exception as e:
+            logger.error(f"Error getting WiFi details on Linux: {e}")
+        
+        return details
+    
+    def get_wifi_windows(self):
+        """Get WiFi details for Windows systems"""
+        details = {
+            'connected': False,
+            'ssid': 'Not Connected',
+            'signal_strength': 0,
+            'ip_address': self.get_ip_address(),
+            'mac_address': self.get_mac_address_windows(),
+            'connection_type': 'N/A',
+            'bitrate': 'N/A',
+            'interface': 'Wi-Fi'
+        }
+        
+        try:
+            # Windows command to get WiFi details
+            result = subprocess.run(['netsh', 'wlan', 'show', 'interfaces'], 
+                                  capture_output=True, text=True, encoding='utf-8', timeout=2)
+            
+            if result.returncode == 0:
+                output = result.stdout
+                
+                # Parse SSID
+                ssid_match = re.search(r'SSID\s*:\s*(.+)', output)
+                if ssid_match and ssid_match.group(1).strip() != "":
+                    details['ssid'] = ssid_match.group(1).strip()
+                    details['connected'] = True
+                
+                # Parse signal strength
+                signal_match = re.search(r'Signal\s*:\s*(\d+)%', output)
+                if signal_match:
+                    details['signal_strength'] = int(signal_match.group(1))
+                
+                # Parse connection type
+                type_match = re.search(r'Radio type\s*:\s*(.+)', output)
+                if type_match:
+                    details['connection_type'] = type_match.group(1).strip()
+                
+                # Parse bitrate
+                rate_match = re.search(r'Receive rate \(Mbps\)\s*:\s*(\d+)', output)
+                if rate_match:
+                    details['bitrate'] = f"{rate_match.group(1)} Mbps"
+        
+        except subprocess.TimeoutExpired:
+            logger.warning("WiFi command timed out on Windows")
+        except Exception as e:
+            logger.error(f"Error getting WiFi details on Windows: {e}")
+        
+        return details
+    
+    def get_mac_address_linux(self):
+        """Get MAC address for Linux"""
+        try:
+            result = subprocess.run(['cat', '/sys/class/net/wlan0/address'], 
+                                   capture_output=True, text=True, timeout=1)
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except:
+            pass
+        return "N/A"
+    
+    def get_mac_address_windows(self):
+        """Get MAC address for Windows"""
+        try:
+            result = subprocess.run(['getmac', '/fo', 'csv', '/v'], 
+                                   capture_output=True, text=True, encoding='utf-8', timeout=1)
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                for line in lines[1:]:  # Skip header
+                    if 'Wi-Fi' in line or 'Wireless' in line:
+                        parts = line.split(',')
+                        if len(parts) > 2:
+                            return parts[2].strip().replace('-', ':')
+        except:
+            pass
+        return "N/A"
+    
+    def get_ip_address(self):
+        """Get IP address of the system"""
+        try:
+            # Get IP address by connecting to Google DNS
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(1)
+            s.connect(("8.8.8.8", 80))
+            ip_address = s.getsockname()[0]
+            s.close()
+            return ip_address
+        except:
+            # Try alternative method
+            try:
+                return socket.gethostbyname(socket.gethostname())
+            except:
+                return "N/A"
+    
+    def get_mock_wifi_data(self):
+        """Get mock WiFi data for testing or unsupported systems"""
+        return {
+            'connected': True,
+            'ssid': 'RobotNetwork_5G',
+            'signal_strength': 85,
+            'ip_address': '192.168.1.100',
+            'mac_address': 'AA:BB:CC:DD:EE:FF',
+            'connection_type': '802.11ac',
+            'bitrate': '866.7 Mbps',
+            'frequency': '5.2 GHz',
+            'tx_power': '20 dBm',
+            'interface': 'wlan0',
+            'noise_level': -75,
+            'link_quality': 85
+        }
+
+def wifi_monitor_thread():
+    """Background thread to update WiFi status"""
+    monitor = WiFiMonitor()
+    while True:
+        try:
+            wifi_status = monitor.get_wifi_status()
+            with wifi_status_lock:
+                wifi_status_data.update(wifi_status)
+            logger.debug(f"WiFi status updated: {wifi_status.get('ssid')} ({wifi_status.get('signal_strength')}%)")
+        except Exception as e:
+            logger.error(f"Error in WiFi monitor thread: {e}")
+        
+        time.sleep(WIFI_UPDATE_INTERVAL)
 
 # ============================================================================
 # Helper Functions for Map Databases
@@ -1909,7 +2171,8 @@ def index():
             'robot_position': 'Available' if ROS_AVAILABLE else 'Disabled (ROS2 not found)',
             'robot_status': 'Available' if ROS_AVAILABLE else 'Disabled (ROS2 not found)',
             'position_database': 'Available (robot_positions.db)',
-            'speed_monitoring': 'Available' if ROS_AVAILABLE else 'Disabled (ROS2 not found)'
+            'speed_monitoring': 'Available' if ROS_AVAILABLE else 'Disabled (ROS2 not found)',
+            'wifi_monitoring': 'Available'
         },
         'endpoints': {
             # Map Database Endpoints (from app.py)
@@ -1932,6 +2195,10 @@ def index():
             'debug': 'GET /debug',
             'topics': 'GET /topics',
             
+            # WiFi Status Endpoints (new)
+            'wifi_status': 'GET /wifi-details',
+            'wifi_health': 'GET /wifi-health',
+            
             # Database Endpoints (from app1.py database features)
             'positions': 'GET /positions',
             'positions_count': 'GET /positions/count',
@@ -1940,15 +2207,84 @@ def index():
             'positions_delete': 'DELETE /positions/delete/<id>',
             'positions_clear': 'DELETE /positions/clear'
         },
-        'version': '4.1.0',
+        'version': '5.0.0',
         'port': 5000,
         'ros_available': ROS_AVAILABLE,
         'databases': {
             'robot_positions': 'robot_positions.db',
             'map_annotations': f'{MAP_DATABASE_DIR}/'
         },
-        'speed_topic': '/odom_raw' if ROS_AVAILABLE else 'Not available'
+        'speed_topic': '/odom_raw' if ROS_AVAILABLE else 'Not available',
+        'wifi_update_interval': f'{WIFI_UPDATE_INTERVAL}s'
     })
+
+# ============================================================================
+# WiFi Status Endpoints (new)
+# ============================================================================
+
+@app.route('/wifi-details', methods=['GET'])
+def get_wifi_details():
+    """Get current WiFi connection details"""
+    try:
+        with wifi_status_lock:
+            wifi_data = dict(wifi_status_data)
+        
+        # Calculate WiFi status based on signal strength
+        signal_strength = wifi_data.get('signal_strength', 0)
+        connected = wifi_data.get('connected', False)
+        
+        if not connected:
+            status = "DISCONNECTED"
+        elif signal_strength < 30:
+            status = "WEAK"
+        elif signal_strength < 70:
+            status = "GOOD"
+        else:
+            status = "EXCELLENT"
+        
+        return jsonify({
+            'status': 'success',
+            'wifi_status': status,
+            'details': wifi_data,
+            'timestamp': datetime.now().isoformat(),
+            'update_interval': WIFI_UPDATE_INTERVAL
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting WiFi details: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/wifi-health', methods=['GET'])
+def get_wifi_health():
+    """Get WiFi health status"""
+    try:
+        with wifi_status_lock:
+            wifi_data = dict(wifi_status_data)
+        
+        connected = wifi_data.get('connected', False)
+        signal_strength = wifi_data.get('signal_strength', 0)
+        
+        health_status = "HEALTHY" if connected and signal_strength > 30 else "UNHEALTHY"
+        
+        return jsonify({
+            'status': 'success',
+            'health': health_status,
+            'connected': connected,
+            'signal_strength': signal_strength,
+            'ssid': wifi_data.get('ssid', 'Unknown'),
+            'ip_address': wifi_data.get('ip_address', 'Unknown'),
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 # ============================================================================
 # Map Database Endpoints (from app.py)
@@ -1967,12 +2303,17 @@ def health_check():
         conn.execute('SELECT 1')
         conn.close()
         
+        # Get WiFi status
+        with wifi_status_lock:
+            wifi_connected = wifi_status_data.get('connected', False)
+        
         return jsonify({
             'status': 'success',
             'message': 'API is healthy',
             'database_system': 'per-map databases',
             'database_directory': MAP_DATABASE_DIR,
             'position_database': 'robot_positions.db',
+            'wifi_status': 'Connected' if wifi_connected else 'Disconnected',
             'timestamp': datetime.now().isoformat()
         })
     except Exception as e:
@@ -2690,6 +3031,9 @@ def debug_info():
         current_speed = dict(robot_status_data["speed"])
         current_odom = dict(robot_status_data["odometry"])
     
+    with wifi_status_lock:
+        current_wifi = dict(wifi_status_data)
+    
     debug_data = {
         'latest_position': latest_robot_position,
         'database_count': db_count,
@@ -2698,6 +3042,7 @@ def debug_info():
         'ros_available': ROS_AVAILABLE,
         'speed_data': current_speed,
         'odometry_data': current_odom,
+        'wifi_data': current_wifi,
         'last_message_times': {k: round(time.time() - v, 3) for k, v in last_msg_time.items() if v > 0},
         'odom_raw_available': last_msg_time.get("odom_raw", 0) > 0,
         'instructions': [
@@ -2705,7 +3050,8 @@ def debug_info():
             '2. Play ROS2 bag: ros2 bag play my_amcl_bag_0.db3',
             '3. Check if /amcl_pose topic has data: ros2 topic echo /amcl_pose',
             '4. Check if /odom_raw topic has data: ros2 topic echo /odom_raw',
-            '5. Positions are automatically saved to database'
+            '5. Positions are automatically saved to database',
+            '6. WiFi status is automatically monitored'
         ]
     }
     
@@ -2752,8 +3098,8 @@ def not_found(error):
             '/', '/health', '/save-nodes', '/load-nodes', '/clear-nodes',
             '/list-maps', '/delete-map', '/robot_position', '/position_status',
             '/position_health', '/status', '/speed', '/odometry',
-            '/debug', '/topics', '/positions', '/positions/count', 
-            '/positions/latest', '/positions/export'
+            '/debug', '/topics', '/wifi-details', '/wifi-health',
+            '/positions', '/positions/count', '/positions/latest', '/positions/export'
         ]
     }), 404
 
@@ -2791,7 +3137,10 @@ if __name__ == '__main__':
     # Speed monitoring info
     print(f"📈 Speed Monitoring via /odom_raw: {'✅ Enabled' if ROS_AVAILABLE else '❌ Disabled'}")
     
-    # From topicstatus.py
+    # WiFi monitoring info
+    print(f"📶 WiFi Monitoring: {'✅ Enabled'}")
+    print(f"📡 WiFi Update Interval: {WIFI_UPDATE_INTERVAL}s")
+    
     print(f"🌐 API Port: 5000")
     print("="*70)
     
@@ -2799,6 +3148,12 @@ if __name__ == '__main__':
     if not os.path.exists(MAP_DATABASE_DIR):
         os.makedirs(MAP_DATABASE_DIR)
         print(f"📁 Created map database directory: {MAP_DATABASE_DIR}")
+    
+    # Start WiFi monitoring thread
+    print("\n📶 Starting WiFi monitoring...")
+    wifi_thread = threading.Thread(target=wifi_monitor_thread, daemon=True)
+    wifi_thread.start()
+    print("✅ WiFi monitoring started")
     
     # Start ROS2 threads if available
     if ROS_AVAILABLE:
@@ -2856,6 +3211,10 @@ if __name__ == '__main__':
     print("   http://localhost:5000/odometry      - GET: Full odometry data")
     print("   http://localhost:5000/debug         - GET: Debug information")
     print("   http://localhost:5000/topics        - GET: List ROS2 topics")
+    
+    print("\n📶 WiFi STATUS API (new):")
+    print("   http://localhost:5000/wifi-details  - GET: WiFi connection details")
+    print("   http://localhost:5000/wifi-health   - GET: WiFi health status")
     
     print("\n💾 DATABASES:")
     print("   - Map annotations: map_databases/*.db")
