@@ -1,5 +1,6 @@
 
 // import React, { useEffect, useRef, useState } from "react";
+// import { useLanguage } from "../context/LanguageContext";
 // import ROSLIB from "roslib";
 // import yaml from "js-yaml";
 // import JSZip from 'jszip';
@@ -22,6 +23,7 @@
 //   FaMoon,
 //   FaSun,
 //   FaBan,
+//   FaHandPaper, // ADD THIS LINE
 //   FaBrush,
 //   FaCut,
 //   FaUndo,
@@ -54,6 +56,7 @@
 // };
 
 // export default function MapEditor() {
+//     const { t } = useLanguage();
 //   // --- Theme state with localStorage persistence ---
 //   const [darkMode, setDarkMode] = useState(() => {
 //     const saved = localStorage.getItem("mapEditorDarkMode");
@@ -1631,6 +1634,7 @@
 //     const { resolution, originX, originY } = mapParamsRef.current;
     
 //     const SCALE_FACTOR = 4;
+//     const CHECKER_SIZE = 8; // Size of checkerboard squares
     
 //     // Create a temporary canvas for drawing everything
 //     const tempCanvas = document.createElement('canvas');
@@ -1668,7 +1672,7 @@
 //       }
 //     }
 
-//     // FIRST: Draw zones (they should be behind everything)
+//     // Transform point helper function
 //     const transformPoint = (point) => {
 //       if (rotation === 0) return { x: point.canvasX, y: point.canvasY };
       
@@ -1698,32 +1702,27 @@
 //       return { x: rotatedX, y: rotatedY };
 //     };
 
-//     // Draw zones with solid black/gray fill
-//     zones.forEach((zone) => {
-//       if (zone.points && zone.points.length >= 3) {
-//         tempCtx.beginPath();
-//         zone.points.forEach((point, idx) => {
-//           const transformed = transformPoint(point);
-//           if (idx === 0) tempCtx.moveTo(transformed.x, transformed.y);
-//           else tempCtx.lineTo(transformed.x, transformed.y);
-//         });
-//         tempCtx.closePath();
-        
-//         if (zone.type === 'keep_out') {
-//           tempCtx.fillStyle = "rgba(0, 0, 0, 1.0)"; // Solid black
-//           tempCtx.fill();
-//         } else {
-//           tempCtx.fillStyle = "rgba(100, 100, 100, 1.0)"; // Solid dark gray
-//           tempCtx.fill();
-//         }
+//     // Helper function to check if a point is in a deleted area
+//     const isPointDeleted = (canvasX, canvasY) => {
+//       // Convert canvas coordinates to map coordinates
+//       const mapX = Math.floor(canvasX);
+//       const mapY = Math.floor(canvasY);
+      
+//       if (mapX < 0 || mapX >= width || mapY < 0 || mapY >= height) {
+//         return true; // Outside map is considered deleted
 //       }
-//     });
+      
+//       const val = mapMsg.data[mapY * width + mapX];
+//       return val === -2 || val === -3; // -2 or -3 means deleted/cropped
+//     };
 
-//     // SECOND: Draw the base map OVER the zones with CHECKERBOARD for deleted areas
+//     // STEP 1: Draw the base map with CHECKERBOARD for deleted areas
 //     const imageData = tempCtx.createImageData(width, height);
-//     const checkerSize = 8; // Size of checkerboard squares
 //     let checkerboardPixels = 0;
 //     let deletedPixels = 0;
+//     let occupiedPixels = 0;
+//     let freePixels = 0;
+//     let unknownPixels = 0;
     
 //     for (let y = 0; y < height; y++) {
 //       for (let x = 0; x < width; x++) {
@@ -1732,20 +1731,25 @@
 //         const i = (py * width + x) * 4;
 
 //         let gray;
-//         if (val === -2) {
-//           // DELETED AREAS - DRAW CHECKERBOARD PATTERN
-//           const isCheckered = ((Math.floor(x / checkerSize) + Math.floor(y / checkerSize)) % 2) === 0;
+//         if (val === -3 || val === -2) {
+//           // CROPPED AREAS (value -3) or DELETED AREAS (-2) - DRAW CHECKERBOARD PATTERN
+//           const isCheckered = ((Math.floor(x / CHECKER_SIZE) + Math.floor(y / CHECKER_SIZE)) % 2) === 0;
 //           gray = isCheckered ? 180 : 220; // Checkerboard pattern (dark gray / light gray)
 //           checkerboardPixels++;
 //           deletedPixels++;
 //         } else if (val === -1) {
 //           gray = 205; // Unknown - medium gray
+//           unknownPixels++;
 //         } else if (val === 0) {
 //           gray = 255; // Free space - white
+//           freePixels++;
 //         } else if (val === 100) {
 //           gray = 0; // Occupied - black
+//           occupiedPixels++;
 //         } else {
 //           gray = 255 - Math.floor((val / 100) * 255); // Grayscale based on occupancy
+//           if (val > 50) occupiedPixels++;
+//           else freePixels++;
 //         }
 
 //         imageData.data[i] = gray;
@@ -1761,19 +1765,91 @@
 //     offCanvas.getContext("2d").putImageData(imageData, 0, 0);
 //     tempCtx.drawImage(offCanvas, 0, 0, width, height);
 
-//     // THIRD: Draw arrows (on top of map)
+//     // STEP 2: Draw zones with deletion check (SAME AS PNG FUNCTION)
+//     zones.forEach((zone) => {
+//       if (zone.points && zone.points.length >= 3) {
+//         // Check if zone center is in deleted area
+//         const centerX = zone.points.reduce((sum, p) => sum + transformPoint(p).x, 0) / zone.points.length;
+//         const centerY = zone.points.reduce((sum, p) => sum + transformPoint(p).y, 0) / zone.points.length;
+        
+//         if (isPointDeleted(centerX, centerY)) {
+//           // Skip drawing zone if center is in deleted area
+//           return;
+//         }
+        
+//         tempCtx.beginPath();
+//         zone.points.forEach((point, idx) => {
+//           const transformed = transformPoint(point);
+//           if (idx === 0) tempCtx.moveTo(transformed.x, transformed.y);
+//           else tempCtx.lineTo(transformed.x, transformed.y);
+//         });
+//         tempCtx.closePath();
+        
+//         // For PGM, we need solid colors (no transparency)
+//         if (zone.type === 'keep_out') {
+//           tempCtx.fillStyle = "rgba(0, 0, 0, 1.0)"; // Solid black for keep_out
+//           tempCtx.fill();
+//           tempCtx.strokeStyle = "rgba(0, 0, 0, 1.0)";
+//           tempCtx.lineWidth = 2 / SCALE_FACTOR;
+//           tempCtx.stroke();
+//         } else {
+//           // For other zones, use a dark gray that will show up in grayscale
+//           tempCtx.fillStyle = "rgba(60, 60, 60, 1.0)"; // Dark gray
+//           tempCtx.fill();
+//           tempCtx.strokeStyle = "rgba(40, 40, 40, 1.0)"; // Even darker gray
+//           tempCtx.lineWidth = 1.4 / SCALE_FACTOR;
+//           tempCtx.stroke();
+//         }
+
+//         // For PGM, we need to convert colors to appropriate grayscale
+//         // Keep_out zones get black text, other zones get dark gray text
+//         if (zone.type === 'keep_out') {
+//           tempCtx.fillStyle = "rgba(0, 0, 0, 1.0)"; // Black text
+//         } else {
+//           tempCtx.fillStyle = "rgba(40, 40, 40, 1.0)"; // Dark gray text
+//         }
+//         tempCtx.font = `${14 / SCALE_FACTOR}px Arial`;
+//         tempCtx.fillText(zone.name, centerX + 16 / SCALE_FACTOR, centerY + 8 / SCALE_FACTOR);
+//       }
+//     });
+
+//     // STEP 3: Draw arrows with deletion check
 //     arrows.forEach((arrow) => {
 //       const fromNode = nodes.find(n => n.id === arrow.fromId);
 //       const toNode = nodes.find(n => n.id === arrow.toId);
       
 //       if (fromNode && toNode) {
+//         // Check if either endpoint is in deleted area
+//         const fromTransformed = transformPoint(fromNode);
+//         const toTransformed = transformPoint(toNode);
+        
+//         if (isPointDeleted(fromTransformed.x, fromTransformed.y) || 
+//             isPointDeleted(toTransformed.x, toTransformed.y)) {
+//           // Skip drawing arrow if endpoints are in deleted areas
+//           return;
+//         }
+        
 //         const allPoints = [fromNode, ...(arrow.points || []), toNode];
 //         if (allPoints.length < 2) return;
         
-//         tempCtx.strokeStyle = "rgba(0, 0, 0, 1.0)"; // Solid black
+//         // Check all points for deletion
+//         let hasDeletedPoint = false;
+//         for (const point of allPoints) {
+//           const transformed = transformPoint(point);
+//           if (isPointDeleted(transformed.x, transformed.y)) {
+//             hasDeletedPoint = true;
+//             break;
+//           }
+//         }
+        
+//         if (hasDeletedPoint) {
+//           // Skip drawing arrow if any point is in deleted area
+//           return;
+//         }
+        
+//         // For PGM, use black for arrows
+//         tempCtx.strokeStyle = "rgba(0, 0, 0, 0.8)";
 //         tempCtx.lineWidth = 4 / SCALE_FACTOR;
-//         tempCtx.lineJoin = 'round';
-//         tempCtx.lineCap = 'round';
 //         tempCtx.beginPath();
         
 //         const firstPoint = transformPoint(allPoints[0]);
@@ -1785,40 +1861,66 @@
 //         }
 //         tempCtx.stroke();
         
-//         // Draw arrow head
 //         const lastPoint = transformPoint(allPoints[allPoints.length - 1]);
 //         const secondLastPoint = transformPoint(allPoints[allPoints.length - 2]);
 //         const angle = Math.atan2(
 //           lastPoint.y - secondLastPoint.y,
 //           lastPoint.x - secondLastPoint.x
 //         );
-//         const headLength = 20 / SCALE_FACTOR;
+//         const headLength = 24 / SCALE_FACTOR;
         
-//         tempCtx.save();
-//         tempCtx.translate(lastPoint.x, lastPoint.y);
-//         tempCtx.rotate(angle);
 //         tempCtx.beginPath();
-//         tempCtx.moveTo(0, 0);
-//         tempCtx.lineTo(-headLength, -headLength / 2);
-//         tempCtx.lineTo(-headLength, headLength / 2);
+//         tempCtx.moveTo(lastPoint.x, lastPoint.y);
+//         tempCtx.lineTo(
+//           lastPoint.x - headLength * Math.cos(angle - Math.PI / 6),
+//           lastPoint.y - headLength * Math.sin(angle - Math.PI / 6)
+//         );
+//         tempCtx.lineTo(
+//           lastPoint.x - headLength * Math.cos(angle + Math.PI / 6),
+//           lastPoint.y - headLength * Math.sin(angle + Math.PI / 6)
+//         );
 //         tempCtx.closePath();
-//         tempCtx.fillStyle = "rgba(0, 0, 0, 1.0)";
+//         tempCtx.fillStyle = "rgba(0, 0, 0, 1)";
 //         tempCtx.fill();
-//         tempCtx.restore();
+        
+//         // Draw control points (middle points of the arrow)
+//         for (let i = 1; i < allPoints.length - 1; i++) {
+//           const point = transformPoint(allPoints[i]);
+//           tempCtx.beginPath();
+//           tempCtx.arc(point.x, point.y, 8 / SCALE_FACTOR, 0, Math.PI * 2);
+//           tempCtx.fillStyle = "rgba(0, 0, 0, 0.6)";
+//           tempCtx.fill();
+//           tempCtx.strokeStyle = "rgba(0, 0, 0, 1)";
+//           tempCtx.lineWidth = 2 / SCALE_FACTOR;
+//           tempCtx.stroke();
+//         }
 //       }
 //     });
 
-//     // FOURTH: Draw nodes (on top of everything)
+//     // STEP 4: Draw nodes with deletion check
 //     nodes.forEach((node) => {
 //       const transformed = transformPoint(node);
       
-//       // Draw node as solid black circle
+//       // Check if node is in deleted area
+//       if (isPointDeleted(transformed.x, transformed.y)) {
+//         // Skip drawing node if it's in deleted area
+//         return;
+//       }
+      
+//       // For PGM, use different shades of gray for different node types
+//       let grayValue = 0; // Default black
+//       if (node.type === 'station') grayValue = 60; // Dark gray
+//       else if (node.type === 'docking') grayValue = 100; // Medium dark gray
+//       else if (node.type === 'waypoint') grayValue = 140; // Medium gray
+//       else if (node.type === 'home') grayValue = 180; // Light gray
+//       else if (node.type === 'charging') grayValue = 220; // Very light gray
+      
 //       tempCtx.beginPath();
 //       tempCtx.arc(transformed.x, transformed.y, 6 / SCALE_FACTOR, 0, Math.PI * 2);
-//       tempCtx.fillStyle = "rgba(0, 0, 0, 1.0)";
+//       tempCtx.fillStyle = `rgba(${grayValue}, ${grayValue}, ${grayValue}, 1)`;
 //       tempCtx.fill();
       
-//       // Draw white border for contrast
+//       // Add white border for contrast
 //       tempCtx.beginPath();
 //       tempCtx.arc(transformed.x, transformed.y, 6 / SCALE_FACTOR, 0, Math.PI * 2);
 //       tempCtx.strokeStyle = "rgba(255, 255, 255, 1.0)";
@@ -1828,11 +1930,11 @@
 
 //     tempCtx.restore();
 
-//     // Save debug preview as PNG to see the checkerboard
+//     // Save debug preview as PNG to see the zones
 //     const debugUrl = tempCanvas.toDataURL('image/png');
 //     const debugLink = document.createElement('a');
 //     debugLink.href = debugUrl;
-//     debugLink.download = 'debug_pgm_preview_with_checkerboard.png';
+//     debugLink.download = 'debug_pgm_preview_with_zones.png';
 //     debugLink.click();
 
 //     // Convert canvas to grayscale for PGM
@@ -1882,15 +1984,19 @@
 // # Original size: ${width}x${height} pixels
 // # Scaled size: ${tempCanvas.width}x${tempCanvas.height} pixels
 // # Rotation: ${rotation}°
-// # Annotations: ${nodes.length} nodes, ${arrows.length} arrows, ${zones.length} zones
-// # Zones: Black/dark gray
-// # Arrows: Black lines
-// # Nodes: Black circles with white border
-// # Deleted areas (-2): CHECKERBOARD PATTERN (180/220 gray)
-// # Deleted pixels: ${deletedPixels} (${checkerboardPixels} shown as checkerboard)
-// # Checkerboard pattern: 8px squares alternating between gray 180 and 220
-// # Note: In PNG export, these areas would be transparent
-// # For PGM, checkerboard indicates "removed/not part of map"`;
+// # Pixel Statistics:
+// #   Checkerboard (deleted/cropped): ${checkerboardPixels} pixels
+// #   Occupied (black): ${occupiedPixels} pixels
+// #   Free (white): ${freePixels} pixels
+// #   Unknown (gray): ${unknownPixels} pixels
+// # Zones: ${zones.length} zones (keep_out: black, others: dark gray)
+// # Zones include labels: ${zones.filter(z => z.name).length} zones with text labels
+// # Arrows: ${arrows.length} arrows (black with control points)
+// # Nodes: ${nodes.length} nodes (different shades of gray by type)
+// # Deleted areas (-2, -3): CHECKERBOARD PATTERN (180/220 gray)
+// # Annotations NOT drawn on deleted areas
+// # Zone drawing matches PNG export style (but in grayscale)
+// # Zone types: keep_out zones are solid black, other zones are dark gray`;
 
 //     const pgmBlob = new Blob([pgmContent], { type: 'image/x-portable-graymap' });
 //     const pgmUrl = URL.createObjectURL(pgmBlob);
@@ -1917,7 +2023,7 @@
 //       URL.revokeObjectURL(yamlUrl);
 //     }, 100);
 
-//     alert(`✅ High-resolution PGM map exported with CHECKERBOARD!\n\n📁 Files saved:\n- ${mapName || 'exported_map'}_rotated_${rotation}_${SCALE_FACTOR}x.pgm\n- ${mapName || 'exported_map'}_rotated_${rotation}_${SCALE_FACTOR}x.yaml\n- debug_pgm_preview_with_checkerboard.png (preview)\n🔄 Rotation: ${rotation}°\n📊 Size: ${tempCanvas.width} x ${tempCanvas.height} pixels (${SCALE_FACTOR}x)\n📍 Resolution: ${newResolution.toFixed(6)} m/pixel\n◻️ Deleted areas: CHECKERBOARD PATTERN (not white)\n🗑️ Deleted pixels: ${deletedPixels}\n⚫ Annotations: Black (zones, arrows, nodes)`);
+//     alert(`✅ High-resolution PGM map exported with ZONES!\n\n📁 Files saved:\n- ${mapName || 'exported_map'}_rotated_${rotation}_${SCALE_FACTOR}x.pgm\n- ${mapName || 'exported_map'}_rotated_${rotation}_${SCALE_FACTOR}x.yaml\n- debug_pgm_preview_with_zones.png (preview)\n🔄 Rotation: ${rotation}°\n📊 Size: ${tempCanvas.width} x ${tempCanvas.height} pixels (${SCALE_FACTOR}x)\n📍 Resolution: ${newResolution.toFixed(6)} m/pixel\n📝 Zones: ${zones.length} zones drawn (keep_out: black, others: dark gray)\n🎯 Nodes: ${nodes.length} nodes (different shades of gray)\n➡️ Arrows: ${arrows.length} arrows (black with control points)\n◻️ Deleted areas: CHECKERBOARD PATTERN\n⚠️ Annotations NOT drawn on deleted areas`);
 
 //   } catch (error) {
 //     console.error('Error exporting high-resolution PGM map:', error);
@@ -2328,7 +2434,53 @@
 //       offsetY: centerY - zoomPointY * newScale
 //     }));
 //   };
+// // Add these functions after your handleWheel function:
 
+// const handleTouchStart = (e) => {
+//   if (e.touches.length === 1) {
+//     const touch = e.touches[0];
+//     const rect = canvasRef.current.getBoundingClientRect();
+//     const x = touch.clientX - rect.left;
+//     const y = touch.clientY - rect.top;
+    
+//     // Always allow panning with touch
+//     setZoomState(prev => ({
+//       ...prev,
+//       isDragging: true,
+//       lastX: x,
+//       lastY: y
+//     }));
+//   }
+//   e.preventDefault();
+// };
+
+// const handleTouchMove = (e) => {
+//   if (e.touches.length === 1 && zoomState.isDragging) {
+//     const touch = e.touches[0];
+//     const rect = canvasRef.current.getBoundingClientRect();
+//     const x = touch.clientX - rect.left;
+//     const y = touch.clientY - rect.top;
+
+//     const deltaX = x - zoomState.lastX;
+//     const deltaY = y - zoomState.lastY;
+    
+//     setZoomState(prev => ({
+//       ...prev,
+//       offsetX: prev.offsetX + deltaX,
+//       offsetY: prev.offsetY + deltaY,
+//       lastX: x,
+//       lastY: y
+//     }));
+//   }
+//   e.preventDefault();
+// };
+
+// const handleTouchEnd = () => {
+//   setZoomState(prev => ({
+//     ...prev,
+//     isDragging: false
+//   }));
+// };
 //   const handleButtonZoom = (zoomFactor) => {
 //     if (!mapMsg || !canvasRef.current) return;
     
@@ -2401,6 +2553,67 @@
 //       setRotation(0);
 //     }
 //   };
+// // Add keyboard shortcuts after your other useEffect hooks
+
+//   // Add keyboard shortcuts after your other useEffect hooks
+//   useEffect(() => {
+//     const handleKeyDown = (e) => {
+//       // Spacebar for temporary pan tool
+//       if (e.code === 'Space' && !e.repeat) {
+//         e.preventDefault();
+//         const prevTool = tool;
+//         setTool("pan");
+        
+//         // Store previous tool to restore it when space is released
+//         const restoreTool = (e) => {
+//           if (e.code === 'Space') {
+//             setTool(prevTool);
+//             window.removeEventListener('keyup', restoreTool);
+//           }
+//         };
+//         window.addEventListener('keyup', restoreTool);
+//       }
+      
+//       // Ctrl+Z for undo, Ctrl+Shift+Z or Ctrl+Y for redo
+//       if (e.ctrlKey) {
+//         if (e.key === 'z' || e.key === 'Z') {
+//           e.preventDefault();
+//           if (e.shiftKey) {
+//             // Ctrl+Shift+Z for redo
+//             handleRedo();
+//           } else {
+//             // Ctrl+Z for undo
+//             handleUndo();
+//           }
+//         }
+//         if (e.key === 'y' || e.key === 'Y') {
+//           e.preventDefault();
+//           // Ctrl+Y for redo
+//           handleRedo();
+//         }
+//       }
+      
+//       // Alternative: Cmd+Z and Cmd+Shift+Z for Mac
+//       if (e.metaKey) {
+//         if (e.key === 'z' || e.key === 'Z') {
+//           e.preventDefault();
+//           if (e.shiftKey) {
+//             // Cmd+Shift+Z for redo
+//             handleRedo();
+//           } else {
+//             // Cmd+Z for undo
+//             handleUndo();
+//           }
+//         }
+//       }
+//     };
+
+//     window.addEventListener('keydown', handleKeyDown);
+    
+//     return () => {
+//       window.removeEventListener('keydown', handleKeyDown);
+//     };
+//   }, [tool, handleUndo, handleRedo]); // Now these functions are stable
 
 //   // --- ROS connection ---
 //   useEffect(() => {
@@ -3090,57 +3303,66 @@
 //           </div>
 //         </div>
 
-//         <div style={{ marginBottom: 16 }}>
-//           <label style={styles.label}>Tools</label>
-//           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
-//             <button 
-//               onClick={() => setTool("place_node")} 
-//               style={tool === "place_node" ? styles.buttonActive : styles.button}
-//             >
-//               <FaMapMarkerAlt />
-//               Node
-//             </button>
-//             <button 
-//               onClick={() => setTool("connect")} 
-//               style={tool === "connect" ? styles.buttonActive : styles.button}
-//             >
-//               <FaArrowRight />
-//               Arrow
-//             </button>
-//             <button 
-//               onClick={() => setTool("zone")} 
-//               style={tool === "zone" ? styles.buttonActive : styles.button}
-//             >
-//               <FaDrawPolygon />
-//               Zone
-//             </button>
-//             <button 
-//               onClick={() => setTool("erase")} 
-//               style={tool === "erase" ? styles.buttonActive : styles.button}
-//             >
-//               <FaEraser />
-//               Erase
-//             </button>
-//             <button 
-//               onClick={startCrop} 
-//               style={tool === "crop" ? styles.buttonActive : styles.button}
-//             >
-//               <FaCropAlt />
-//               Crop
-//             </button>
-//             <button 
-//               onClick={() => {
-//                 setTool("zone");
-//                 setZoneType("keep_out");
-//               }} 
-//               style={zoneType === "keep_out" ? styles.buttonKeepOut : styles.button}
-//             >
-//               <FaBan />
-//               Restricted Zone
-//             </button>
-//           </div>
-//         </div>
-
+//        <div style={{ marginBottom: 16 }}>
+//   <label style={styles.label}>Tools</label>
+//   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
+//     {/* Hand (Pan) Tool - NEW */}
+//     <button 
+//       onClick={() => setTool("pan")} 
+//       style={tool === "pan" ? styles.buttonActive : styles.button}
+//       title="Drag to pan the map (Middle mouse button also works)"
+//     >
+//       <FaHandPaper />
+//       Pan
+//     </button>
+    
+//     <button 
+//       onClick={() => setTool("place_node")} 
+//       style={tool === "place_node" ? styles.buttonActive : styles.button}
+//     >
+//       <FaMapMarkerAlt />
+//       Node
+//     </button>
+//     <button 
+//       onClick={() => setTool("connect")} 
+//       style={tool === "connect" ? styles.buttonActive : styles.button}
+//     >
+//       <FaArrowRight />
+//       Arrow
+//     </button>
+//     <button 
+//       onClick={() => setTool("zone")} 
+//       style={tool === "zone" ? styles.buttonActive : styles.button}
+//     >
+//       <FaDrawPolygon />
+//       Zone
+//     </button>
+//     <button 
+//       onClick={() => setTool("erase")} 
+//       style={tool === "erase" ? styles.buttonActive : styles.button}
+//     >
+//       <FaEraser />
+//       Erase
+//     </button>
+//     <button 
+//       onClick={startCrop} 
+//       style={tool === "crop" ? styles.buttonActive : styles.button}
+//     >
+//       <FaCropAlt />
+//       Crop
+//     </button>
+//     <button 
+//       onClick={() => {
+//         setTool("zone");
+//         setZoneType("keep_out");
+//       }} 
+//       style={zoneType === "keep_out" ? styles.buttonKeepOut : styles.button}
+//     >
+//       <FaBan />
+//       Restricted Zone
+//     </button>
+//   </div>
+// </div>
 //         {/* Erase Mode Controls */}
 //         {tool === "erase" && (
 //           <div style={{ marginBottom: 16, padding: 12, background: currentTheme.surface, borderRadius: 8, border: `2px solid ${currentTheme.accent}` }}>
@@ -3534,27 +3756,31 @@
 //             </button>
 //           </div>
 
-//           <canvas
-//             ref={canvasRef}
-//             style={{ 
-//               width: "100%", 
-//               height: "100%", 
-//               display: "block", 
-//               cursor: cropState.isCropping ? "crosshair" : 
-//                       zoomState.isDragging ? "grabbing" : 
-//                       tool === "erase" && eraseMode === "hand" ? "crosshair" : "crosshair" 
-//             }}
-//             onMouseDown={handleMouseDown}
-//             onMouseMove={handleMouseMove}
-//             onMouseUp={handleMouseUp}
-//             onMouseLeave={() => { 
-//               setCursorCoords(null); 
-//               setZoomState((p)=> ({...p, isDragging:false})); 
-//               setCropState(prev => ({...prev, isDragging: false}));
-//               if (handEraseState.isErasing) stopHandErase();
-//             }}
-//             onWheel={handleWheel}
-//           />
+//    <canvas
+//   ref={canvasRef}
+//   style={{ 
+//     width: "100%", 
+//     height: "100%", 
+//     display: "block", 
+//     cursor: tool === "pan" ? (zoomState.isDragging ? "grabbing" : "grab") :
+//             cropState.isCropping ? "crosshair" : 
+//             tool === "erase" && eraseMode === "hand" ? "crosshair" : "crosshair" 
+//   }}
+//   onMouseDown={handleMouseDown}
+//   onMouseMove={handleMouseMove}
+//   onMouseUp={handleMouseUp}
+//   onMouseLeave={() => { 
+//     setCursorCoords(null); 
+//     setZoomState((p)=> ({...p, isDragging:false})); 
+//     setCropState(prev => ({...prev, isDragging: false}));
+//     if (handEraseState.isErasing) stopHandErase();
+//   }}
+//   onWheel={handleWheel}
+//   onTouchStart={handleTouchStart}
+//   onTouchMove={handleTouchMove}
+//   onTouchEnd={handleTouchEnd}
+//   onTouchCancel={handleTouchEnd}
+// />
 //         </div>
 //       </div>
 //     </div>
@@ -3586,11 +3812,17 @@ import {
   FaMoon,
   FaSun,
   FaBan,
-  FaHandPaper, // ADD THIS LINE
+  FaHandPaper,
   FaBrush,
   FaCut,
   FaUndo,
-  FaRedoAlt
+  FaRedoAlt,
+  FaTimes,
+  FaCheck,
+  FaPalette,
+  FaTools,
+  FaFileExport,
+  FaDatabase
 } from "react-icons/fa";
 
 // OpenCV loader
@@ -3619,7 +3851,8 @@ const loadOpenCV = () => {
 };
 
 export default function MapEditor() {
-    const { t } = useLanguage();
+  const { t } = useLanguage();
+  
   // --- Theme state with localStorage persistence ---
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem("mapEditorDarkMode");
@@ -3645,7 +3878,7 @@ export default function MapEditor() {
   // --- Editor state ---
   const [tool, setTool] = useState(() => {
     const saved = localStorage.getItem("tool");
-    return saved || "place_node";
+    return saved || "pan";
   });
   const [nodeType, setNodeType] = useState(() => {
     const saved = localStorage.getItem("nodeType");
@@ -3656,7 +3889,7 @@ export default function MapEditor() {
     return saved || "";
   });
   const [zoneName, setZoneName] = useState("");
-  const [zoneType, setZoneType] = useState("normal"); // "normal" or "keep_out"
+  const [zoneType, setZoneType] = useState("normal");
   const [nodes, setNodes] = useState(() => {
     const saved = localStorage.getItem("nodes");
     return saved ? JSON.parse(saved) : [];
@@ -3695,13 +3928,13 @@ export default function MapEditor() {
     endX: 0,
     endY: 0,
     isDragging: false,
-    freehandPoints: [] // Store freehand points
+    freehandPoints: []
   });
 
   // --- Erase mode state ---
   const [eraseMode, setEraseMode] = useState(() => {
     const saved = localStorage.getItem("eraseMode");
-    return saved || "objects"; // "objects", "noise", or "hand"
+    return saved || "objects";
   });
   const [eraseRadius, setEraseRadius] = useState(() => {
     const saved = localStorage.getItem("eraseRadius");
@@ -3949,6 +4182,7 @@ export default function MapEditor() {
   const styles = {
     container: {
       display: "flex",
+      flexDirection: "column",
       gap: 12,
       padding: 12,
       width: "100%",
@@ -3958,22 +4192,49 @@ export default function MapEditor() {
       minHeight: '100vh',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
     },
+    mainContent: {
+      display: "flex",
+      gap: 12,
+      flex: 1
+    },
     sidebar: {
-      width: 320,
+      width: 280,
       background: currentTheme.card,
       borderRadius: 12,
       padding: 16,
       boxShadow: "0 4px 20px rgba(0,0,0,0.1)",
       border: `1px solid ${currentTheme.border}`,
     },
+    mapContainer: {
+      flex: 1,
+      display: "flex",
+      flexDirection: "column",
+      gap: 12
+    },
     canvasContainer: {
       flex: 1,
       border: `2px solid ${currentTheme.border}`,
       borderRadius: 12,
       background: currentTheme.surface,
-      minHeight: 900,
       position: "relative",
-      overflow: "hidden"
+      overflow: "hidden",
+      minHeight: 600
+    },
+    toolbar: {
+      display: "flex",
+      flexWrap: "wrap",
+      gap: 8,
+      padding: 12,
+      background: currentTheme.card,
+      borderRadius: 12,
+      border: `1px solid ${currentTheme.border}`,
+      marginTop: 8
+    },
+    buttonGroup: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 8,
+      marginBottom: 16
     },
     button: {
       padding: "10px 12px",
@@ -3988,8 +4249,8 @@ export default function MapEditor() {
       display: 'flex',
       alignItems: 'center',
       gap: 8,
-      flex: 1,
-      justifyContent: 'center'
+      justifyContent: 'center',
+      flex: 1
     },
     buttonActive: {
       padding: "10px 12px",
@@ -4004,8 +4265,8 @@ export default function MapEditor() {
       display: 'flex',
       alignItems: 'center',
       gap: 8,
-      flex: 1,
-      justifyContent: 'center'
+      justifyContent: 'center',
+      flex: 1
     },
     buttonAction: {
       padding: "10px 12px",
@@ -4020,8 +4281,8 @@ export default function MapEditor() {
       display: 'flex',
       alignItems: 'center',
       gap: 8,
-      flex: 1,
-      justifyContent: 'center'
+      justifyContent: 'center',
+      flex: 1
     },
     buttonDanger: {
       padding: "10px 12px",
@@ -4036,52 +4297,39 @@ export default function MapEditor() {
       display: 'flex',
       alignItems: 'center',
       gap: 8,
-      flex: 1,
       justifyContent: 'center'
     },
-    buttonKeepOut: {
-      padding: "10px 12px",
-      borderRadius: 8,
-      border: "none",
-      background: '#000000',
-      color: '#ffffff',
-      cursor: "pointer",
-      fontSize: '14px',
-      fontWeight: '500',
-      transition: 'all 0.2s ease',
-      display: 'flex',
-      alignItems: 'center',
-      gap: 8,
-      flex: 1,
-      justifyContent: 'center'
-    },
-    buttonUndoRedo: {
+    buttonSmall: {
       padding: "8px 12px",
       borderRadius: 8,
       border: `1px solid ${currentTheme.border}`,
       background: currentTheme.card,
       color: currentTheme.text,
       cursor: "pointer",
-      fontSize: '14px',
+      fontSize: '13px',
       fontWeight: '500',
       transition: 'all 0.2s ease',
       display: 'flex',
       alignItems: 'center',
       gap: 6,
       justifyContent: 'center',
-      minWidth: '44px'
+      whiteSpace: 'nowrap'
     },
-    smallButton: {
-      padding: 10,
+    buttonSmallActive: {
+      padding: "8px 12px",
       borderRadius: 8,
-      border: "none",
+      border: `1px solid ${currentTheme.accent}`,
       background: currentTheme.accent,
-      color: "#fff",
+      color: "white",
       cursor: "pointer",
+      fontSize: '13px',
+      fontWeight: '500',
+      transition: 'all 0.2s ease',
       display: 'flex',
       alignItems: 'center',
+      gap: 6,
       justifyContent: 'center',
-      transition: 'all 0.2s ease',
+      whiteSpace: 'nowrap'
     },
     input: {
       width: "100%",
@@ -4145,17 +4393,40 @@ export default function MapEditor() {
       fontSize: 14,
       fontWeight: '500',
       border: `1px solid ${currentTheme.border}`
+    },
+    zoomControls: {
+      position: "absolute",
+      top: 12,
+      right: 12,
+      display: "flex",
+      flexDirection: "column",
+      gap: 8,
+      zIndex: 20,
+      background: currentTheme.card,
+      padding: 12,
+      borderRadius: 12,
+      boxShadow: "0 6px 18px rgba(0,0,0,0.15)",
+      border: `1px solid ${currentTheme.border}`
+    },
+    zoomButton: {
+      padding: 10,
+      borderRadius: 8,
+      border: "none",
+      background: currentTheme.accent,
+      color: "#fff",
+      cursor: "pointer",
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      transition: 'all 0.2s ease',
     }
   };
 
-  // --- Helper Functions ---
-
-  // Point in polygon algorithm
+  // --- Point in polygon algorithm ---
   const isPointInPolygon = (point, polygon) => {
     const x = point.x, y = point.y;
     
     if (!polygon || polygon.length < 3) {
-      console.warn("Invalid polygon for point-in-polygon check:", polygon);
       return false;
     }
 
@@ -4171,25 +4442,6 @@ export default function MapEditor() {
     }
     
     return inside;
-  };
-
-  // Get bounding box of freehand selection
-  const getFreehandBoundingBox = (points) => {
-    if (!points || points.length === 0) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
-    
-    let minX = points[0].x;
-    let minY = points[0].y;
-    let maxX = points[0].x;
-    let maxY = points[0].y;
-    
-    points.forEach(point => {
-      minX = Math.min(minX, point.x);
-      minY = Math.min(minY, point.y);
-      maxX = Math.max(maxX, point.x);
-      maxY = Math.max(maxY, point.y);
-    });
-    
-    return { minX, minY, maxX, maxY };
   };
 
   // --- Map Loader Functions ---
@@ -4281,7 +4533,6 @@ export default function MapEditor() {
         setMapName(mapNameFromFile);
       }
 
-      // Clear history when new map is loaded
       clearHistory();
 
     } catch (err) {
@@ -4314,289 +4565,50 @@ export default function MapEditor() {
       isDragging: false,
       freehandPoints: []
     });
-    setTool("place_node");
+    setTool("pan");
   };
-// Apply crop to current map (visual checkerboard for SELECTED area)
-// Apply crop to current map (KEEP the SELECTED area, DELETE everything else)
-// Apply crop to current map (DELETE everything OUTSIDE selected area with transparency)
-const handleApplyCrop = () => {
-  console.log("✂️ Applying crop to current map - KEEP selected area, DELETE everything else WITH TRANSPARENCY");
 
-  if (!mapMsg || !mapParamsRef.current) {
-    alert("No map loaded!");
-    return;
-  }
-
-  if (!cropState.freehandPoints || cropState.freehandPoints.length < 3) {
-    alert("Draw a closed freehand shape first!");
-    return;
-  }
-
-  // Save state before cropping for undo
-  saveToHistory();
-
-  const { width, height } = mapParamsRef.current;
-
-  // Convert freehand (canvas coords) → map coords (flip Y axis)
-  const mapPolygon = cropState.freehandPoints.map(p => ({
-    x: p.x,
-    y: height - 1 - p.y
-  }));
-
-  const newData = new Int8Array([...mapMsg.data]);
-  let keptPixels = 0;
-  let deletedPixels = 0;
-
-  // DELETE everything OUTSIDE the selected area with TRUE TRANSPARENCY
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = y * width + x;
-      
-      if (isPointInPolygon({ x, y }, mapPolygon)) {
-        // INSIDE polygon - KEEP original value
-        // But make sure it's not already transparent
-        if (newData[idx] !== -2 && newData[idx] !== -3) {
-          keptPixels++;
-        }
-      } else {
-        // OUTSIDE polygon - MAKE IT TRANSPARENT (REAL TRANSPARENCY)
-        // Use -3 for true transparency (not checkerboard)
-        newData[idx] = -3; // This will be transparent in PNG export
-        deletedPixels++;
-      }
-    }
-  }
-
-  console.log(`✅ Applied crop with transparency: Kept ${keptPixels} pixels INSIDE selection, made ${deletedPixels} pixels TRANSPARENT`);
-
-  // Update map
-  setMapMsg(prev => prev ? { ...prev, data: newData } : null);
-  setEditableMap(prev => prev ? { ...prev, data: [...newData] } : null);
-
-  // Reset state
-  setCropState({
-    isCropping: false,
-    startX: 0,
-    startY: 0,
-    endX: 0,
-    endY: 0,
-    isDragging: false,
-    freehandPoints: []
-  });
-
-  setTool("place_node");
-
-  alert(`✅ Crop applied with TRANSPARENCY!\n\n✅ Kept ${keptPixels} pixels INSIDE selection\n🌫️ Made ${deletedPixels} pixels TRANSPARENT\n📸 Will be transparent in PNG export`);
-};
-
-// Export TRULY cropped map (KEEP only INSIDE selected area)
-const handleExportCroppedMap = async () => {
-  console.log("📐 Exporting truly cropped map - KEEP only INSIDE selected area");
-
-  const SCALE_FACTOR = 4;
-
-  if (!mapMsg || !mapParamsRef.current) {
-    alert("No map loaded!");
-    return;
-  }
-
-  if (!cropState.freehandPoints || cropState.freehandPoints.length < 3) {
-    alert("Invalid crop selection! Please draw at least 3 points.");
-    return;
-  }
-
-  try {
-    const freehandPoints = cropState.freehandPoints;
-    const { width, height, resolution, originX, originY, rotation = 0 } = mapParamsRef.current;
-
-    // Convert freehand points from canvas to map coordinates
-    const mapPolygon = freehandPoints.map(p => ({
-      x: p.x,
-      y: height - 1 - p.y  // flip Y axis
-    }));
-
-    // Find bounds of the SELECTED area only
-    let minX = width, minY = height, maxX = 0, maxY = 0;
-    let hasContent = false;
-
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        if (isPointInPolygon({ x, y }, mapPolygon)) { // INSIDE selection
-          const srcIndex = y * width + x;
-          // Only consider non-deleted, non-empty pixels
-          if (mapMsg.data[srcIndex] !== -2 && mapMsg.data[srcIndex] !== 0) {
-            minX = Math.min(minX, x);
-            minY = Math.min(minY, y);
-            maxX = Math.max(maxX, x);
-            maxY = Math.max(maxY, y);
-            hasContent = true;
-          }
-        }
-      }
-    }
-
-    if (!hasContent) {
-      alert("No valid map content found INSIDE the selected area!");
+  const handleApplyCrop = () => {
+    if (!mapMsg || !mapParamsRef.current) {
+      alert("No map loaded!");
       return;
     }
 
-    // Add padding
-    const padding = 2;
-    minX = Math.max(0, minX - padding);
-    minY = Math.max(0, minY - padding);
-    maxX = Math.min(width - 1, maxX + padding);
-    maxY = Math.min(height - 1, maxY + padding);
+    if (!cropState.freehandPoints || cropState.freehandPoints.length < 3) {
+      alert("Draw a closed freehand shape first!");
+      return;
+    }
 
-    const contentWidth = maxX - minX + 1;
-    const contentHeight = maxY - minY + 1;
+    saveToHistory();
 
-    console.log(`📐 True crop bounds: ${minX},${minY} to ${maxX},${maxY} (${contentWidth}x${contentHeight})`);
+    const { width, height } = mapParamsRef.current;
+    const mapPolygon = cropState.freehandPoints.map(p => ({
+      x: p.x,
+      y: height - 1 - p.y
+    }));
 
-    // Create new map data with ONLY content from INSIDE selected area
-    const contentData = new Int8Array(contentWidth * contentHeight);
+    const newData = new Int8Array([...mapMsg.data]);
     let keptPixels = 0;
+    let deletedPixels = 0;
 
-    for (let y = 0; y < contentHeight; y++) {
-      for (let x = 0; x < contentWidth; x++) {
-        const srcX = minX + x;
-        const srcY = minY + y;
-        const srcIndex = srcY * width + srcX;
-        const dstIndex = y * contentWidth + x;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = y * width + x;
         
-        if (isPointInPolygon({ x: srcX, y: srcY }, mapPolygon)) {
-          // INSIDE polygon - keep if not deleted
-          if (mapMsg.data[srcIndex] !== -2) {
-            contentData[dstIndex] = mapMsg.data[srcIndex];
-            if (mapMsg.data[srcIndex] !== 0 && mapMsg.data[srcIndex] !== -1) {
-              keptPixels++;
-            }
-          } else {
-            // Deleted area inside polygon - make it white
-            contentData[dstIndex] = 0;
+        if (isPointInPolygon({ x, y }, mapPolygon)) {
+          if (newData[idx] !== -2 && newData[idx] !== -3) {
+            keptPixels++;
           }
         } else {
-          // OUTSIDE polygon - make it white (transparent)
-          contentData[dstIndex] = 0;
+          newData[idx] = -3;
+          deletedPixels++;
         }
       }
     }
 
-    console.log(`✅ True crop: ${keptPixels} non-white pixels kept (inside selected area)`);
+    setMapMsg(prev => prev ? { ...prev, data: newData } : null);
+    setEditableMap(prev => prev ? { ...prev, data: [...newData] } : null);
 
-    // Calculate new origin for the truly cropped map
-    const newOriginX = originX + minX * resolution;
-    const newOriginY = originY + (height - (minY + contentHeight)) * resolution;
-
-    // Create high-res canvas
-    const scaledW = contentWidth * SCALE_FACTOR;
-    const scaledH = contentHeight * SCALE_FACTOR;
-    const canvas = document.createElement("canvas");
-    canvas.width = scaledW;
-    canvas.height = scaledH;
-    const ctx = canvas.getContext("2d");
-    ctx.scale(SCALE_FACTOR, SCALE_FACTOR);
-
-    // Fill background with transparent
-    ctx.clearRect(0, 0, contentWidth, contentHeight);
-
-    ctx.save();
-    if (rotation !== 0) {
-      ctx.translate(contentWidth / 2, contentHeight / 2);
-      ctx.rotate((rotation * Math.PI) / 180);
-      ctx.translate(-contentWidth / 2, -contentHeight / 2);
-    }
-
-    // Create and draw image data
-    const imgData = ctx.createImageData(contentWidth, contentHeight);
-    for (let y = 0; y < contentHeight; y++) {
-      for (let x = 0; x < contentWidth; x++) {
-        const val = contentData[y * contentWidth + x];
-        const py = contentHeight - 1 - y;
-        const i = (py * contentWidth + x) * 4;
-        
-        let gray, alpha;
-        if (val === 100) {
-          gray = 0;   // Black
-          alpha = 255;
-        } else if (val === -1) {
-          gray = 128; // Gray for unknown
-          alpha = 255;
-        } else if (val === 0) {
-          // White areas should be transparent if they're outside selection
-          const srcX = minX + x;
-          const srcY = minY + y;
-          if (isPointInPolygon({ x: srcX, y: srcY }, mapPolygon)) {
-            // Inside selection - white but opaque
-            gray = 255;
-            alpha = 255;
-          } else {
-            // Outside selection - transparent
-            gray = 255;
-            alpha = 0;
-          }
-        } else {
-          gray = 255;
-          alpha = 255;
-        }
-        
-        imgData.data[i] = gray;
-        imgData.data[i + 1] = gray;
-        imgData.data[i + 2] = gray;
-        imgData.data[i + 3] = alpha;
-      }
-    }
-
-    const offCanvas = document.createElement("canvas");
-    offCanvas.width = contentWidth;
-    offCanvas.height = contentHeight;
-    offCanvas.getContext("2d").putImageData(imgData, 0, 0);
-    ctx.drawImage(offCanvas, 0, 0);
-    ctx.restore();
-
-    // Save files
-    const fileBase = `${mapName || "true_cropped"}_${contentWidth}x${contentHeight}_hires${SCALE_FACTOR}x_rot${rotation}`;
-    const newResolution = resolution / SCALE_FACTOR;
-
-    // Save PNG
-    canvas.toBlob((blob) => {
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${fileBase}.png`;
-      link.click();
-      URL.revokeObjectURL(url);
-    }, "image/png");
-
-    // Save YAML
-    const yamlContent = `image: ${fileBase}.png
-mode: trinary
-resolution: ${newResolution.toFixed(6)}
-origin: [${newOriginX.toFixed(6)}, ${newOriginY.toFixed(6)}, 0]
-negate: 0
-occupied_thresh: 0.65
-free_thresh: 0.25
-# True cropped map - KEEPING ONLY SELECTED AREA
-# Selected area inside freehand polygon is kept
-# Everything outside is removed
-# Original resolution: ${resolution} m/pixel
-# Scaled resolution: ${newResolution.toFixed(6)} m/pixel
-# Scale factor: ${SCALE_FACTOR}x
-# Content size: ${contentWidth}x${contentHeight} pixels
-# Scaled size: ${scaledW}x${scaledH} pixels
-# Rotation: ${rotation}°
-# Pixels kept: ${keptPixels}
-# True crop bounds: x[${minX},${maxX}], y[${minY},${maxY}]
-# Map size reduced from ${width}x${height} to ${contentWidth}x${contentHeight}`;
-
-    const yamlBlob = new Blob([yamlContent], { type: "application/x-yaml" });
-    const yamlUrl = URL.createObjectURL(yamlBlob);
-    const yamlLink = document.createElement("a");
-    yamlLink.href = yamlUrl;
-    yamlLink.download = `${fileBase}.yaml`;
-    yamlLink.click();
-    URL.revokeObjectURL(yamlUrl);
-
-    // Reset state
     setCropState({
       isCropping: false,
       startX: 0,
@@ -4607,380 +4619,878 @@ free_thresh: 0.25
       freehandPoints: []
     });
 
-    setTool("place_node");
+    setTool("pan");
 
-    setTimeout(() => {
-      alert(`✅ True Cropped Map Exported!\n\n📄 ${fileBase}.png\n✅ Kept ${keptPixels} non-white pixels INSIDE selection\n🗑️ Completely removed EVERYTHING OUTSIDE selection\n📏 Map size: ${contentWidth}x${contentHeight} pixels (reduced from ${width}x${height})\n📍 Resolution: ${newResolution.toFixed(6)} m/pixel\n⚪ Everything outside selection completely removed`);
-    }, 100);
+    alert(`✅ Crop applied with TRANSPARENCY!\n\n✅ Kept ${keptPixels} pixels INSIDE selection\n🌫️ Made ${deletedPixels} pixels TRANSPARENT`);
+  };
 
-  } catch (e) {
-    console.error("Error exporting true cropped map:", e);
-    alert("❌ Error exporting true cropped map");
-  }
-};
+  const handleExportCroppedMap = async () => {
+    const SCALE_FACTOR = 4;
 
-const saveMapAsPNG = () => {
-  if (!mapMsg || !mapParamsRef.current) {
-    alert("No map loaded to save!");
-    return;
-  }
-
-  // If there's an active crop selection, ask user what they want
-  if (cropState.freehandPoints && cropState.freehandPoints.length >= 3) {
-    const choice = confirm(
-      "Crop selection detected!\n\n" +
-      "Click OK to export the truly cropped map (only selected area, reduced size).\n" +
-      "Click Cancel to save current map with transparent deleted areas."
-    );
-    
-    if (choice) {
-      // Export truly cropped map (reduced size)
-      handleExportCroppedMap();
+    if (!mapMsg || !mapParamsRef.current) {
+      alert("No map loaded!");
       return;
     }
-    // Continue to save current map with transparency
-  }
 
-  // Save the full map (or currently displayed map) with transparency for deleted areas
-  try {
-    const { width, height } = mapMsg;
-    const { resolution, originX, originY } = mapParamsRef.current;
-    
-    const SCALE_FACTOR = 4;
-    
-    const tempCanvas = document.createElement('canvas');
-    const ctx = tempCanvas.getContext('2d');
-    
-    tempCanvas.width = width * SCALE_FACTOR;
-    tempCanvas.height = height * SCALE_FACTOR;
-    
-    // Clear with transparent background
-    ctx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
-    
-    ctx.save();
-    ctx.scale(SCALE_FACTOR, SCALE_FACTOR);
-    
-    if (rotation !== 0) {
-      ctx.translate(width / 2, height / 2);
-      ctx.rotate((rotation * Math.PI) / 180);
-      ctx.translate(-width / 2, -height / 2);
+    if (!cropState.freehandPoints || cropState.freehandPoints.length < 3) {
+      alert("Invalid crop selection! Please draw at least 3 points.");
+      return;
     }
 
-    // STEP 1: Draw base map with TRUE TRANSPARENCY for deleted areas
-    const imageData = ctx.createImageData(width, height);
-    
-    // Count transparent pixels for feedback
-let transparentPixels = 0;
-let occupiedPixels = 0;
-let freePixels = 0;
-let unknownPixels = 0;
-let checkerboardPixels = 0;
-    
-   for (let y = 0; y < height; y++) {
-  for (let x = 0; x < width; x++) {
-    const val = mapMsg.data[y * width + x];
-    const py = height - 1 - y;
-    const i = (py * width + x) * 4;
-    
-    let gray, alpha;
-    
-    if (val === -3) {
-      // CROPPED AREAS (value -3) - MAKE TRANSPARENT
-      gray = 255; // White
-      alpha = 0;  // Fully transparent
-      transparentPixels++;
-    } else if (val === -2) {
-      // OLD DELETED AREAS - ALSO TRANSPARENT
-      gray = 255;
-      alpha = 0;
-      transparentPixels++;
-    } else if (val === -1) {
-      gray = 205;
-      alpha = 255;
-      unknownPixels++;
-    } else if (val === 0) {
-      gray = 255;
-      alpha = 255;
-      freePixels++;
-    } else if (val === 100) {
-      gray = 0;
-      alpha = 255;
-      occupiedPixels++;
-    } else {
-      gray = 255 - Math.floor((val / 100) * 255);
-      alpha = 255;
-      if (val > 50) occupiedPixels++;
-      else freePixels++;
-    }
+    try {
+      const freehandPoints = cropState.freehandPoints;
+      const { width, height, resolution, originX, originY } = mapParamsRef.current;
 
-    imageData.data[i] = gray;
-    imageData.data[i + 1] = gray;
-    imageData.data[i + 2] = gray;
-    imageData.data[i + 3] = alpha;
-  }
-}
-    
-    const off = document.createElement("canvas");
-    off.width = width;
-    off.height = height;
-    off.getContext("2d").putImageData(imageData, 0, 0);
-    ctx.drawImage(off, 0, 0, width, height);
+      const mapPolygon = freehandPoints.map(p => ({
+        x: p.x,
+        y: height - 1 - p.y
+      }));
 
-    // STEP 2: Create a mask for transparent areas so annotations don't overwrite them
-    // We'll check if a pixel is transparent before drawing annotations
-    
-    // Helper function to check if a point is in a transparent area
-    const isPointTransparent = (canvasX, canvasY) => {
-      // Convert canvas coordinates to map coordinates
-      const mapX = Math.floor(canvasX);
-      const mapY = Math.floor(canvasY);
-      
-      if (mapX < 0 || mapX >= width || mapY < 0 || mapY >= height) {
-        return true; // Outside map is transparent
-      }
-      
-      const val = mapMsg.data[mapY * width + mapX];
-      return val === -2; // -2 means transparent
-    };
+      let minX = width, minY = height, maxX = 0, maxY = 0;
+      let hasContent = false;
 
-    // Transform point helper function
-    const transformPoint = (point) => {
-      if (rotation === 0) return { x: point.canvasX, y: point.canvasY };
-      
-      const nx = point.canvasX / width;
-      const ny = point.canvasY / height;
-      
-      let rotatedX, rotatedY;
-      
-      switch (rotation) {
-        case 90:
-          rotatedX = (1 - ny) * width;
-          rotatedY = nx * height;
-          break;
-        case 180:
-          rotatedX = (1 - nx) * width;
-          rotatedY = (1 - ny) * height;
-          break;
-        case 270:
-          rotatedX = ny * width;
-          rotatedY = (1 - nx) * height;
-          break;
-        default:
-          rotatedX = point.canvasX;
-          rotatedY = point.canvasY;
-      }
-      
-      return { x: rotatedX, y: rotatedY };
-    };
-
-    // STEP 3: Draw zones with transparency check
-    zones.forEach((zone) => {
-      if (zone.points && zone.points.length >= 3) {
-        // Check if zone center is in transparent area
-        const centerX = zone.points.reduce((sum, p) => sum + transformPoint(p).x, 0) / zone.points.length;
-        const centerY = zone.points.reduce((sum, p) => sum + transformPoint(p).y, 0) / zone.points.length;
-        
-        if (isPointTransparent(centerX, centerY)) {
-          // Skip drawing zone if center is in transparent area
-          return;
-        }
-        
-        ctx.beginPath();
-        zone.points.forEach((point, idx) => {
-          const transformed = transformPoint(point);
-          if (idx === 0) ctx.moveTo(transformed.x, transformed.y);
-          else ctx.lineTo(transformed.x, transformed.y);
-        });
-        ctx.closePath();
-        
-        if (zone.type === 'keep_out') {
-          ctx.fillStyle = "rgba(0, 0, 0, 1.0)";
-          ctx.fill();
-          ctx.strokeStyle = "rgba(0, 0, 0, 1.0)";
-          ctx.lineWidth = 2 / SCALE_FACTOR;
-          ctx.stroke();
-        } else {
-          ctx.fillStyle = "rgba(100, 200, 100, 0.3)";
-          ctx.fill();
-          ctx.strokeStyle = "rgba(50, 150, 50, 0.8)";
-          ctx.lineWidth = 1.4 / SCALE_FACTOR;
-          ctx.stroke();
-        }
-
-        if (zone.type === 'keep_out') {
-          ctx.fillStyle = "rgba(220, 38, 38, 1)";
-        } else {
-          ctx.fillStyle = "rgba(50, 150, 50, 1)";
-        }
-        ctx.font = `${14 / SCALE_FACTOR}px Arial`;
-        ctx.fillText(zone.name, centerX + 16 / SCALE_FACTOR, centerY + 8 / SCALE_FACTOR);
-      }
-    });
-
-    // STEP 4: Draw arrows with transparency check
-    arrows.forEach((arrow) => {
-      const fromNode = nodes.find(n => n.id === arrow.fromId);
-      const toNode = nodes.find(n => n.id === arrow.toId);
-      
-      if (fromNode && toNode) {
-        // Check if either endpoint is in transparent area
-        const fromTransformed = transformPoint(fromNode);
-        const toTransformed = transformPoint(toNode);
-        
-        if (isPointTransparent(fromTransformed.x, fromTransformed.y) || 
-            isPointTransparent(toTransformed.x, toTransformed.y)) {
-          // Skip drawing arrow if endpoints are in transparent areas
-          return;
-        }
-        
-        const allPoints = [fromNode, ...(arrow.points || []), toNode];
-        if (allPoints.length < 2) return;
-        
-        // Check all points for transparency
-        let hasTransparentPoint = false;
-        for (const point of allPoints) {
-          const transformed = transformPoint(point);
-          if (isPointTransparent(transformed.x, transformed.y)) {
-            hasTransparentPoint = true;
-            break;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          if (isPointInPolygon({ x, y }, mapPolygon)) {
+            const srcIndex = y * width + x;
+            if (mapMsg.data[srcIndex] !== -2 && mapMsg.data[srcIndex] !== 0) {
+              minX = Math.min(minX, x);
+              minY = Math.min(minY, y);
+              maxX = Math.max(maxX, x);
+              maxY = Math.max(maxY, y);
+              hasContent = true;
+            }
           }
         }
+      }
+
+      if (!hasContent) {
+        alert("No valid map content found INSIDE the selected area!");
+        return;
+      }
+
+      const padding = 2;
+      minX = Math.max(0, minX - padding);
+      minY = Math.max(0, minY - padding);
+      maxX = Math.min(width - 1, maxX + padding);
+      maxY = Math.min(height - 1, maxY + padding);
+
+      const contentWidth = maxX - minX + 1;
+      const contentHeight = maxY - minY + 1;
+
+      const contentData = new Int8Array(contentWidth * contentHeight);
+      let keptPixels = 0;
+
+      for (let y = 0; y < contentHeight; y++) {
+        for (let x = 0; x < contentWidth; x++) {
+          const srcX = minX + x;
+          const srcY = minY + y;
+          const srcIndex = srcY * width + srcX;
+          const dstIndex = y * contentWidth + x;
+          
+          if (isPointInPolygon({ x: srcX, y: srcY }, mapPolygon)) {
+            if (mapMsg.data[srcIndex] !== -2) {
+              contentData[dstIndex] = mapMsg.data[srcIndex];
+              if (mapMsg.data[srcIndex] !== 0 && mapMsg.data[srcIndex] !== -1) {
+                keptPixels++;
+              }
+            } else {
+              contentData[dstIndex] = 0;
+            }
+          } else {
+            contentData[dstIndex] = 0;
+          }
+        }
+      }
+
+      const newOriginX = originX + minX * resolution;
+      const newOriginY = originY + (height - (minY + contentHeight)) * resolution;
+
+      const scaledW = contentWidth * SCALE_FACTOR;
+      const scaledH = contentHeight * SCALE_FACTOR;
+      const canvas = document.createElement("canvas");
+      canvas.width = scaledW;
+      canvas.height = scaledH;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(SCALE_FACTOR, SCALE_FACTOR);
+
+      ctx.clearRect(0, 0, contentWidth, contentHeight);
+
+      if (rotation !== 0) {
+        ctx.translate(contentWidth / 2, contentHeight / 2);
+        ctx.rotate((rotation * Math.PI) / 180);
+        ctx.translate(-contentWidth / 2, -contentHeight / 2);
+      }
+
+      const imgData = ctx.createImageData(contentWidth, contentHeight);
+      for (let y = 0; y < contentHeight; y++) {
+        for (let x = 0; x < contentWidth; x++) {
+          const val = contentData[y * contentWidth + x];
+          const py = contentHeight - 1 - y;
+          const i = (py * contentWidth + x) * 4;
+          
+          let gray, alpha;
+          if (val === 100) {
+            gray = 0;
+            alpha = 255;
+          } else if (val === -1) {
+            gray = 128;
+            alpha = 255;
+          } else if (val === 0) {
+            const srcX = minX + x;
+            const srcY = minY + y;
+            if (isPointInPolygon({ x: srcX, y: srcY }, mapPolygon)) {
+              gray = 255;
+              alpha = 255;
+            } else {
+              gray = 255;
+              alpha = 0;
+            }
+          } else {
+            gray = 255;
+            alpha = 255;
+          }
+          
+          imgData.data[i] = gray;
+          imgData.data[i + 1] = gray;
+          imgData.data[i + 2] = gray;
+          imgData.data[i + 3] = alpha;
+        }
+      }
+
+      const offCanvas = document.createElement("canvas");
+      offCanvas.width = contentWidth;
+      offCanvas.height = contentHeight;
+      offCanvas.getContext("2d").putImageData(imgData, 0, 0);
+      ctx.drawImage(offCanvas, 0, 0);
+
+      const fileBase = `${mapName || "true_cropped"}_${contentWidth}x${contentHeight}_hires${SCALE_FACTOR}x_rot${rotation}`;
+      const newResolution = resolution / SCALE_FACTOR;
+
+      canvas.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${fileBase}.png`;
+        link.click();
+        URL.revokeObjectURL(url);
+      }, "image/png");
+
+      const yamlContent = `image: ${fileBase}.png
+mode: trinary
+resolution: ${newResolution.toFixed(6)}
+origin: [${newOriginX.toFixed(6)}, ${newOriginY.toFixed(6)}, 0]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.25`;
+
+      const yamlBlob = new Blob([yamlContent], { type: "application/x-yaml" });
+      const yamlUrl = URL.createObjectURL(yamlBlob);
+      const yamlLink = document.createElement("a");
+      yamlLink.href = yamlUrl;
+      yamlLink.download = `${fileBase}.yaml`;
+      yamlLink.click();
+      URL.revokeObjectURL(yamlUrl);
+
+      setCropState({
+        isCropping: false,
+        startX: 0,
+        startY: 0,
+        endX: 0,
+        endY: 0,
+        isDragging: false,
+        freehandPoints: []
+      });
+
+      setTool("pan");
+
+      setTimeout(() => {
+        alert(`✅ True Cropped Map Exported!\n\n📄 ${fileBase}.png\n✅ Kept ${keptPixels} non-white pixels\n📏 Map size: ${contentWidth}x${contentHeight} pixels`);
+      }, 100);
+
+    } catch (e) {
+      console.error("Error exporting true cropped map:", e);
+      alert("❌ Error exporting true cropped map");
+    }
+  };
+
+  // --- Save Map as PNG ---
+  const saveMapAsPNG = () => {
+    if (!mapMsg || !mapParamsRef.current) {
+      alert("No map loaded to save!");
+      return;
+    }
+
+    if (cropState.freehandPoints && cropState.freehandPoints.length >= 3) {
+      const choice = confirm(
+        "Crop selection detected!\n\n" +
+        "Click OK to export the truly cropped map.\n" +
+        "Click Cancel to save current map with transparent deleted areas."
+      );
+      
+      if (choice) {
+        handleExportCroppedMap();
+        return;
+      }
+    }
+
+    try {
+      const { width, height } = mapMsg;
+      const { resolution, originX, originY } = mapParamsRef.current;
+      
+      const SCALE_FACTOR = 4;
+      
+      const tempCanvas = document.createElement('canvas');
+      const ctx = tempCanvas.getContext('2d');
+      
+      tempCanvas.width = width * SCALE_FACTOR;
+      tempCanvas.height = height * SCALE_FACTOR;
+      
+      ctx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+      
+      ctx.save();
+      ctx.scale(SCALE_FACTOR, SCALE_FACTOR);
+      
+      if (rotation !== 0) {
+        ctx.translate(width / 2, height / 2);
+        ctx.rotate((rotation * Math.PI) / 180);
+        ctx.translate(-width / 2, -height / 2);
+      }
+
+      const imageData = ctx.createImageData(width, height);
+      let transparentPixels = 0;
+      let occupiedPixels = 0;
+      let freePixels = 0;
+      let unknownPixels = 0;
+      
+     for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const val = mapMsg.data[y * width + x];
+        const py = height - 1 - y;
+        const i = (py * width + x) * 4;
         
-        if (hasTransparentPoint) {
-          // Skip drawing arrow if any point is in transparent area
+        let gray, alpha;
+        
+        if (val === -3) {
+          gray = 255;
+          alpha = 0;
+          transparentPixels++;
+        } else if (val === -2) {
+          gray = 255;
+          alpha = 0;
+          transparentPixels++;
+        } else if (val === -1) {
+          gray = 205;
+          alpha = 255;
+          unknownPixels++;
+        } else if (val === 0) {
+          gray = 255;
+          alpha = 255;
+          freePixels++;
+        } else if (val === 100) {
+          gray = 0;
+          alpha = 255;
+          occupiedPixels++;
+        } else {
+          gray = 255 - Math.floor((val / 100) * 255);
+          alpha = 255;
+          if (val > 50) occupiedPixels++;
+          else freePixels++;
+        }
+
+        imageData.data[i] = gray;
+        imageData.data[i + 1] = gray;
+        imageData.data[i + 2] = gray;
+        imageData.data[i + 3] = alpha;
+      }
+    }
+      
+      const off = document.createElement("canvas");
+      off.width = width;
+      off.height = height;
+      off.getContext("2d").putImageData(imageData, 0, 0);
+      ctx.drawImage(off, 0, 0, width, height);
+
+      const isPointTransparent = (canvasX, canvasY) => {
+        const mapX = Math.floor(canvasX);
+        const mapY = Math.floor(canvasY);
+        
+        if (mapX < 0 || mapX >= width || mapY < 0 || mapY >= height) {
+          return true;
+        }
+        
+        const val = mapMsg.data[mapY * width + mapX];
+        return val === -2;
+      };
+
+      const transformPoint = (point) => {
+        if (rotation === 0) return { x: point.canvasX, y: point.canvasY };
+        
+        const nx = point.canvasX / width;
+        const ny = point.canvasY / height;
+        
+        let rotatedX, rotatedY;
+        
+        switch (rotation) {
+          case 90:
+            rotatedX = (1 - ny) * width;
+            rotatedY = nx * height;
+            break;
+          case 180:
+            rotatedX = (1 - nx) * width;
+            rotatedY = (1 - ny) * height;
+            break;
+          case 270:
+            rotatedX = ny * width;
+            rotatedY = (1 - nx) * height;
+            break;
+          default:
+            rotatedX = point.canvasX;
+            rotatedY = point.canvasY;
+        }
+        
+        return { x: rotatedX, y: rotatedY };
+      };
+
+      zones.forEach((zone) => {
+        if (zone.points && zone.points.length >= 3) {
+          const centerX = zone.points.reduce((sum, p) => sum + transformPoint(p).x, 0) / zone.points.length;
+          const centerY = zone.points.reduce((sum, p) => sum + transformPoint(p).y, 0) / zone.points.length;
+          
+          if (isPointTransparent(centerX, centerY)) {
+            return;
+          }
+          
+          ctx.beginPath();
+          zone.points.forEach((point, idx) => {
+            const transformed = transformPoint(point);
+            if (idx === 0) ctx.moveTo(transformed.x, transformed.y);
+            else ctx.lineTo(transformed.x, transformed.y);
+          });
+          ctx.closePath();
+          
+          if (zone.type === 'keep_out') {
+            ctx.fillStyle = "rgba(0, 0, 0, 1.0)";
+            ctx.fill();
+            ctx.strokeStyle = "rgba(0, 0, 0, 1.0)";
+            ctx.lineWidth = 2 / SCALE_FACTOR;
+            ctx.stroke();
+          } else {
+            ctx.fillStyle = "rgba(100, 200, 100, 0.3)";
+            ctx.fill();
+            ctx.strokeStyle = "rgba(50, 150, 50, 0.8)";
+            ctx.lineWidth = 1.4 / SCALE_FACTOR;
+            ctx.stroke();
+          }
+
+          if (zone.type === 'keep_out') {
+            ctx.fillStyle = "rgba(220, 38, 38, 1)";
+          } else {
+            ctx.fillStyle = "rgba(50, 150, 50, 1)";
+          }
+          ctx.font = `${14 / SCALE_FACTOR}px Arial`;
+          ctx.fillText(zone.name, centerX + 16 / SCALE_FACTOR, centerY + 8 / SCALE_FACTOR);
+        }
+      });
+
+      arrows.forEach((arrow) => {
+        const fromNode = nodes.find(n => n.id === arrow.fromId);
+        const toNode = nodes.find(n => n.id === arrow.toId);
+        
+        if (fromNode && toNode) {
+          const fromTransformed = transformPoint(fromNode);
+          const toTransformed = transformPoint(toNode);
+          
+          if (isPointTransparent(fromTransformed.x, fromTransformed.y) || 
+              isPointTransparent(toTransformed.x, toTransformed.y)) {
+            return;
+          }
+          
+          const allPoints = [fromNode, ...(arrow.points || []), toNode];
+          if (allPoints.length < 2) return;
+          
+          let hasTransparentPoint = false;
+          for (const point of allPoints) {
+            const transformed = transformPoint(point);
+            if (isPointTransparent(transformed.x, transformed.y)) {
+              hasTransparentPoint = true;
+              break;
+            }
+          }
+          
+          if (hasTransparentPoint) {
+            return;
+          }
+          
+          ctx.strokeStyle = "rgba(255, 165, 0, 0.8)";
+          ctx.lineWidth = 4 / SCALE_FACTOR;
+          ctx.beginPath();
+          
+          const firstPoint = transformPoint(allPoints[0]);
+          ctx.moveTo(firstPoint.x, firstPoint.y);
+          
+          for (let i = 1; i < allPoints.length; i++) {
+            const point = transformPoint(allPoints[i]);
+            ctx.lineTo(point.x, point.y);
+          }
+          ctx.stroke();
+          
+          const lastPoint = transformPoint(allPoints[allPoints.length - 1]);
+          const secondLastPoint = transformPoint(allPoints[allPoints.length - 2]);
+          const angle = Math.atan2(
+            lastPoint.y - secondLastPoint.y,
+            lastPoint.x - secondLastPoint.x
+          );
+          const headLength = 24 / SCALE_FACTOR;
+          
+          ctx.beginPath();
+          ctx.moveTo(lastPoint.x, lastPoint.y);
+          ctx.lineTo(
+            lastPoint.x - headLength * Math.cos(angle - Math.PI / 6),
+            lastPoint.y - headLength * Math.sin(angle - Math.PI / 6)
+          );
+          ctx.lineTo(
+            lastPoint.x - headLength * Math.cos(angle + Math.PI / 6),
+            lastPoint.y - headLength * Math.sin(angle + Math.PI / 6)
+          );
+          ctx.closePath();
+          ctx.fillStyle = "rgba(255, 165, 0, 1)";
+          ctx.fill();
+          
+          for (let i = 1; i < allPoints.length - 1; i++) {
+            const point = transformPoint(allPoints[i]);
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, 8 / SCALE_FACTOR, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(255, 165, 0, 0.6)";
+            ctx.fill();
+            ctx.strokeStyle = "rgba(255, 165, 0, 1)";
+            ctx.lineWidth = 2 / SCALE_FACTOR;
+            ctx.stroke();
+          }
+        }
+      });
+
+      nodes.forEach((node) => {
+        const transformed = transformPoint(node);
+        
+        if (isPointTransparent(transformed.x, transformed.y)) {
           return;
         }
         
-        ctx.strokeStyle = "rgba(255, 165, 0, 0.8)";
-        ctx.lineWidth = 4 / SCALE_FACTOR;
-        ctx.beginPath();
+        const nodeColors = {
+          station: '#8b5cf6',
+          docking: '#06b6d4',
+          waypoint: '#f59e0b',
+          home: '#10b981',
+          charging: '#ef4444'
+        };
         
-        const firstPoint = transformPoint(allPoints[0]);
-        ctx.moveTo(firstPoint.x, firstPoint.y);
-        
-        for (let i = 1; i < allPoints.length; i++) {
-          const point = transformPoint(allPoints[i]);
-          ctx.lineTo(point.x, point.y);
-        }
-        ctx.stroke();
-        
-        const lastPoint = transformPoint(allPoints[allPoints.length - 1]);
-        const secondLastPoint = transformPoint(allPoints[allPoints.length - 2]);
-        const angle = Math.atan2(
-          lastPoint.y - secondLastPoint.y,
-          lastPoint.x - secondLastPoint.x
-        );
-        const headLength = 24 / SCALE_FACTOR;
+        const nodeColor = nodeColors[node.type] || "#3b82f6";
         
         ctx.beginPath();
-        ctx.moveTo(lastPoint.x, lastPoint.y);
-        ctx.lineTo(
-          lastPoint.x - headLength * Math.cos(angle - Math.PI / 6),
-          lastPoint.y - headLength * Math.sin(angle - Math.PI / 6)
-        );
-        ctx.lineTo(
-          lastPoint.x - headLength * Math.cos(angle + Math.PI / 6),
-          lastPoint.y - headLength * Math.sin(angle + Math.PI / 6)
-        );
-        ctx.closePath();
-        ctx.fillStyle = "rgba(255, 165, 0, 1)";
+        ctx.arc(transformed.x, transformed.y, 6 / SCALE_FACTOR, 0, Math.PI * 2);
+        ctx.fillStyle = nodeColor;
         ctx.fill();
-        
-        for (let i = 1; i < allPoints.length - 1; i++) {
-          const point = transformPoint(allPoints[i]);
-          ctx.beginPath();
-          ctx.arc(point.x, point.y, 8 / SCALE_FACTOR, 0, Math.PI * 2);
-          ctx.fillStyle = "rgba(255, 165, 0, 0.6)";
-          ctx.fill();
-          ctx.strokeStyle = "rgba(255, 165, 0, 1)";
-          ctx.lineWidth = 2 / SCALE_FACTOR;
-          ctx.stroke();
-        }
-      }
-    });
+      });
 
-    // STEP 5: Draw nodes with transparency check
-    nodes.forEach((node) => {
-      const transformed = transformPoint(node);
-      
-      // Check if node is in transparent area
-      if (isPointTransparent(transformed.x, transformed.y)) {
-        // Skip drawing node if it's in transparent area
-        return;
-      }
-      
-      const nodeColors = {
-        station: '#8b5cf6',
-        docking: '#06b6d4',
-        waypoint: '#f59e0b',
-        home: '#10b981',
-        charging: '#ef4444'
-      };
-      
-      const nodeColor = nodeColors[node.type] || "#3b82f6";
-      
-      ctx.beginPath();
-      ctx.arc(transformed.x, transformed.y, 6 / SCALE_FACTOR, 0, Math.PI * 2);
-      ctx.fillStyle = nodeColor;
-      ctx.fill();
-    });
+      ctx.restore();
 
-    ctx.restore();
-
-    // Generate YAML file
-    const newResolution = resolution / SCALE_FACTOR;
-    const yamlContent = `image: ${mapName || 'map'}_rotated_${rotation}_${SCALE_FACTOR}x.png
+      const newResolution = resolution / SCALE_FACTOR;
+      const yamlContent = `image: ${mapName || 'map'}_rotated_${rotation}_${SCALE_FACTOR}x.png
 mode: trinary
 resolution: ${newResolution.toFixed(6)}
 origin: [${originX}, ${originY}, 0]
 negate: 0
 occupied_thresh: 0.65
-free_thresh: 0.25
-# High-resolution export WITH REAL TRANSPARENCY
-# Original resolution: ${resolution} m/pixel
-# Scaled resolution: ${newResolution.toFixed(6)} m/pixel
-# Scale factor: ${SCALE_FACTOR}x
-# Original size: ${width}x${height} pixels
-# Scaled size: ${tempCanvas.width}x${tempCanvas.height} pixels
-# Rotation: ${rotation}°
-# Pixel Statistics:
-#   Transparent (deleted/cropped): ${transparentPixels} pixels
-#   Occupied (black): ${occupiedPixels} pixels
-#   Free (white): ${freePixels} pixels
-#   Unknown (gray): ${unknownPixels} pixels
-# Deleted areas (-2): REAL TRANSPARENCY (alpha=0)
-# Annotations NOT drawn on transparent areas
-# Annotations included: Nodes (${nodes.length}), Arrows (${arrows.length}), Zones (${zones.length})`;
+free_thresh: 0.25`;
 
-    tempCanvas.toBlob((blob) => {
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${mapName || 'map'}_rotated_${rotation}_${SCALE_FACTOR}x.png`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      tempCanvas.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${mapName || 'map'}_rotated_${rotation}_${SCALE_FACTOR}x.png`;
+        link.click();
+        URL.revokeObjectURL(url);
+        
+        const yamlBlob = new Blob([yamlContent], { type: "application/x-yaml" });
+        const yamlUrl = URL.createObjectURL(yamlBlob);
+        const yamlLink = document.createElement('a');
+        yamlLink.href = yamlUrl;
+        yamlLink.download = `${mapName || 'map'}_rotated_${rotation}_${SCALE_FACTOR}x.yaml`;
+        yamlLink.click();
+        URL.revokeObjectURL(yamlUrl);
+        
+        alert(`✅ High-resolution map saved WITH REAL TRANSPARENCY!\n\n📁 Files:\n- ${mapName || 'map'}_rotated_${rotation}_${SCALE_FACTOR}x.png\n- ${mapName || 'map'}_rotated_${rotation}_${SCALE_FACTOR}x.yaml\n📊 Size: ${tempCanvas.width} x ${tempCanvas.height} pixels (${SCALE_FACTOR}x)`);
+
+      }, 'image/png', 1.0);
+
+    } catch (error) {
+      console.error('Error saving high-resolution map as PNG:', error);
+      alert('❌ Error saving high-resolution map as PNG. Check console for details.');
+    }
+  };
+
+  // --- Save Map to Computer (PGM) ---
+  const saveMapToComputer = async () => {
+    if (!mapMsg || !mapParamsRef.current) {
+      alert("No map loaded to save!");
+      return;
+    }
+
+    if (!opencvLoaded) {
+      alert("OpenCV is still loading. Please wait a moment and try again.");
+      return;
+    }
+
+    try {
+      const { width, height } = mapMsg;
+      const { resolution, originX, originY } = mapParamsRef.current;
       
-      const yamlBlob = new Blob([yamlContent], { type: "application/x-yaml" });
+      const SCALE_FACTOR = 4;
+      const CHECKER_SIZE = 8;
+      
+      const tempCanvas = document.createElement('canvas');
+      const tempCtx = tempCanvas.getContext('2d');
+      
+      if (rotation === 90 || rotation === 270) {
+        tempCanvas.width = height * SCALE_FACTOR;
+        tempCanvas.height = width * SCALE_FACTOR;
+      } else {
+        tempCanvas.width = width * SCALE_FACTOR;
+        tempCanvas.height = height * SCALE_FACTOR;
+      }
+      
+      tempCtx.fillStyle = 'white';
+      tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+      
+      tempCtx.save();
+      tempCtx.scale(SCALE_FACTOR, SCALE_FACTOR);
+      
+      if (rotation !== 0) {
+        const centerX = tempCanvas.width / (2 * SCALE_FACTOR);
+        const centerY = tempCanvas.height / (2 * SCALE_FACTOR);
+        tempCtx.translate(centerX, centerY);
+        tempCtx.rotate((rotation * Math.PI) / 180);
+        
+        if (rotation === 90) {
+          tempCtx.translate(-centerY, -centerX);
+        } else if (rotation === 180) {
+          tempCtx.translate(-centerX, -centerY);
+        } else if (rotation === 270) {
+          tempCtx.translate(-centerY, -centerX);
+        } else {
+          tempCtx.translate(-centerX, -centerY);
+        }
+      }
+
+      const transformPoint = (point) => {
+        if (rotation === 0) return { x: point.canvasX, y: point.canvasY };
+        
+        const nx = point.canvasX / width;
+        const ny = point.canvasY / height;
+        
+        let rotatedX, rotatedY;
+        
+        switch (rotation) {
+          case 90:
+            rotatedX = (1 - ny) * width;
+            rotatedY = nx * height;
+            break;
+          case 180:
+            rotatedX = (1 - nx) * width;
+            rotatedY = (1 - ny) * height;
+            break;
+          case 270:
+            rotatedX = ny * width;
+            rotatedY = (1 - nx) * height;
+            break;
+          default:
+            rotatedX = point.canvasX;
+            rotatedY = point.canvasY;
+        }
+        
+        return { x: rotatedX, y: rotatedY };
+      };
+
+      const isPointDeleted = (canvasX, canvasY) => {
+        const mapX = Math.floor(canvasX);
+        const mapY = Math.floor(canvasY);
+        
+        if (mapX < 0 || mapX >= width || mapY < 0 || mapY >= height) {
+          return true;
+        }
+        
+        const val = mapMsg.data[mapY * width + mapX];
+        return val === -2 || val === -3;
+      };
+
+      const imageData = tempCtx.createImageData(width, height);
+      let checkerboardPixels = 0;
+      let deletedPixels = 0;
+      let occupiedPixels = 0;
+      let freePixels = 0;
+      let unknownPixels = 0;
+      
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const val = mapMsg.data[y * width + x];
+          const py = height - 1 - y;
+          const i = (py * width + x) * 4;
+
+          let gray;
+          if (val === -3 || val === -2) {
+            const isCheckered = ((Math.floor(x / CHECKER_SIZE) + Math.floor(y / CHECKER_SIZE)) % 2) === 0;
+            gray = isCheckered ? 180 : 220;
+            checkerboardPixels++;
+            deletedPixels++;
+          } else if (val === -1) {
+            gray = 205;
+            unknownPixels++;
+          } else if (val === 0) {
+            gray = 255;
+            freePixels++;
+          } else if (val === 100) {
+            gray = 0;
+            occupiedPixels++;
+          } else {
+            gray = 255 - Math.floor((val / 100) * 255);
+            if (val > 50) occupiedPixels++;
+            else freePixels++;
+          }
+
+          imageData.data[i] = gray;
+          imageData.data[i + 1] = gray;
+          imageData.data[i + 2] = gray;
+          imageData.data[i + 3] = 255;
+        }
+      }
+      
+      const offCanvas = document.createElement("canvas");
+      offCanvas.width = width;
+      offCanvas.height = height;
+      offCanvas.getContext("2d").putImageData(imageData, 0, 0);
+      tempCtx.drawImage(offCanvas, 0, 0, width, height);
+
+      zones.forEach((zone) => {
+        if (zone.points && zone.points.length >= 3) {
+          const centerX = zone.points.reduce((sum, p) => sum + transformPoint(p).x, 0) / zone.points.length;
+          const centerY = zone.points.reduce((sum, p) => sum + transformPoint(p).y, 0) / zone.points.length;
+          
+          if (isPointDeleted(centerX, centerY)) {
+            return;
+          }
+          
+          tempCtx.beginPath();
+          zone.points.forEach((point, idx) => {
+            const transformed = transformPoint(point);
+            if (idx === 0) tempCtx.moveTo(transformed.x, transformed.y);
+            else tempCtx.lineTo(transformed.x, transformed.y);
+          });
+          tempCtx.closePath();
+          
+          if (zone.type === 'keep_out') {
+            tempCtx.fillStyle = "rgba(0, 0, 0, 1.0)";
+            tempCtx.fill();
+            tempCtx.strokeStyle = "rgba(0, 0, 0, 1.0)";
+            tempCtx.lineWidth = 2 / SCALE_FACTOR;
+            tempCtx.stroke();
+          } else {
+            tempCtx.fillStyle = "rgba(60, 60, 60, 1.0)";
+            tempCtx.fill();
+            tempCtx.strokeStyle = "rgba(40, 40, 40, 1.0)";
+            tempCtx.lineWidth = 1.4 / SCALE_FACTOR;
+            tempCtx.stroke();
+          }
+
+          if (zone.type === 'keep_out') {
+            tempCtx.fillStyle = "rgba(0, 0, 0, 1.0)";
+          } else {
+            tempCtx.fillStyle = "rgba(40, 40, 40, 1.0)";
+          }
+          tempCtx.font = `${14 / SCALE_FACTOR}px Arial`;
+          tempCtx.fillText(zone.name, centerX + 16 / SCALE_FACTOR, centerY + 8 / SCALE_FACTOR);
+        }
+      });
+
+      arrows.forEach((arrow) => {
+        const fromNode = nodes.find(n => n.id === arrow.fromId);
+        const toNode = nodes.find(n => n.id === arrow.toId);
+        
+        if (fromNode && toNode) {
+          const fromTransformed = transformPoint(fromNode);
+          const toTransformed = transformPoint(toNode);
+          
+          if (isPointDeleted(fromTransformed.x, fromTransformed.y) || 
+              isPointDeleted(toTransformed.x, toTransformed.y)) {
+            return;
+          }
+          
+          const allPoints = [fromNode, ...(arrow.points || []), toNode];
+          if (allPoints.length < 2) return;
+          
+          let hasDeletedPoint = false;
+          for (const point of allPoints) {
+            const transformed = transformPoint(point);
+            if (isPointDeleted(transformed.x, transformed.y)) {
+              hasDeletedPoint = true;
+              break;
+            }
+          }
+          
+          if (hasDeletedPoint) {
+            return;
+          }
+          
+          tempCtx.strokeStyle = "rgba(0, 0, 0, 0.8)";
+          tempCtx.lineWidth = 4 / SCALE_FACTOR;
+          tempCtx.beginPath();
+          
+          const firstPoint = transformPoint(allPoints[0]);
+          tempCtx.moveTo(firstPoint.x, firstPoint.y);
+          
+          for (let i = 1; i < allPoints.length; i++) {
+            const point = transformPoint(allPoints[i]);
+            tempCtx.lineTo(point.x, point.y);
+          }
+          tempCtx.stroke();
+          
+          const lastPoint = transformPoint(allPoints[allPoints.length - 1]);
+          const secondLastPoint = transformPoint(allPoints[allPoints.length - 2]);
+          const angle = Math.atan2(
+            lastPoint.y - secondLastPoint.y,
+            lastPoint.x - secondLastPoint.x
+          );
+          const headLength = 24 / SCALE_FACTOR;
+          
+          tempCtx.beginPath();
+          tempCtx.moveTo(lastPoint.x, lastPoint.y);
+          tempCtx.lineTo(
+            lastPoint.x - headLength * Math.cos(angle - Math.PI / 6),
+            lastPoint.y - headLength * Math.sin(angle - Math.PI / 6)
+          );
+          tempCtx.lineTo(
+            lastPoint.x - headLength * Math.cos(angle + Math.PI / 6),
+            lastPoint.y - headLength * Math.sin(angle + Math.PI / 6)
+          );
+          tempCtx.closePath();
+          tempCtx.fillStyle = "rgba(0, 0, 0, 1)";
+          tempCtx.fill();
+          
+          for (let i = 1; i < allPoints.length - 1; i++) {
+            const point = transformPoint(allPoints[i]);
+            tempCtx.beginPath();
+            tempCtx.arc(point.x, point.y, 8 / SCALE_FACTOR, 0, Math.PI * 2);
+            tempCtx.fillStyle = "rgba(0, 0, 0, 0.6)";
+            tempCtx.fill();
+            tempCtx.strokeStyle = "rgba(0, 0, 0, 1)";
+            tempCtx.lineWidth = 2 / SCALE_FACTOR;
+            tempCtx.stroke();
+          }
+        }
+      });
+
+      nodes.forEach((node) => {
+        const transformed = transformPoint(node);
+        
+        if (isPointDeleted(transformed.x, transformed.y)) {
+          return;
+        }
+        
+        let grayValue = 0;
+        if (node.type === 'station') grayValue = 60;
+        else if (node.type === 'docking') grayValue = 100;
+        else if (node.type === 'waypoint') grayValue = 140;
+        else if (node.type === 'home') grayValue = 180;
+        else if (node.type === 'charging') grayValue = 220;
+        
+        tempCtx.beginPath();
+        tempCtx.arc(transformed.x, transformed.y, 6 / SCALE_FACTOR, 0, Math.PI * 2);
+        tempCtx.fillStyle = `rgba(${grayValue}, ${grayValue}, ${grayValue}, 1)`;
+        tempCtx.fill();
+        
+        tempCtx.beginPath();
+        tempCtx.arc(transformed.x, transformed.y, 6 / SCALE_FACTOR, 0, Math.PI * 2);
+        tempCtx.strokeStyle = "rgba(255, 255, 255, 1.0)";
+        tempCtx.lineWidth = 1 / SCALE_FACTOR;
+        tempCtx.stroke();
+      });
+
+      tempCtx.restore();
+
+      const debugUrl = tempCanvas.toDataURL('image/png');
+      const debugLink = document.createElement('a');
+      debugLink.href = debugUrl;
+      debugLink.download = 'debug_pgm_preview_with_zones.png';
+      debugLink.click();
+
+      const imageDataFromCanvas = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+      const finalMat = new cv.Mat(tempCanvas.height, tempCanvas.width, cv.CV_8UC1);
+      
+      for (let y = 0; y < tempCanvas.height; y++) {
+        for (let x = 0; x < tempCanvas.width; x++) {
+          const i = (y * tempCanvas.width + x) * 4;
+          const r = imageDataFromCanvas.data[i];
+          const g = imageDataFromCanvas.data[i + 1];
+          const b = imageDataFromCanvas.data[i + 2];
+          
+          const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+          finalMat.ucharPtr(y, x)[0] = gray;
+        }
+      }
+
+      const pgmHeader = `P5\n${tempCanvas.width} ${tempCanvas.height}\n255\n`;
+      const pgmData = new Uint8Array(tempCanvas.width * tempCanvas.height);
+      
+      for (let y = 0; y < tempCanvas.height; y++) {
+        for (let x = 0; x < tempCanvas.width; x++) {
+          pgmData[y * tempCanvas.width + x] = finalMat.ucharPtr(y, x)[0];
+        }
+      }
+
+      const pgmContent = new Uint8Array(pgmHeader.length + pgmData.length);
+      const encoder = new TextEncoder();
+      const headerBytes = encoder.encode(pgmHeader);
+      pgmContent.set(headerBytes);
+      pgmContent.set(pgmData, headerBytes.length);
+
+      const newResolution = resolution / SCALE_FACTOR;
+      const yamlContent = `image: ${mapName || 'exported_map'}_rotated_${rotation}_${SCALE_FACTOR}x.pgm
+mode: trinary
+resolution: ${newResolution.toFixed(6)}
+origin: [${originX}, ${originY}, 0]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.25`;
+
+      const pgmBlob = new Blob([pgmContent], { type: 'image/x-portable-graymap' });
+      const pgmUrl = URL.createObjectURL(pgmBlob);
+      const pgmLink = document.createElement('a');
+      pgmLink.href = pgmUrl;
+      pgmLink.download = `${mapName || 'exported_map'}_rotated_${rotation}_${SCALE_FACTOR}x.pgm`;
+      pgmLink.click();
+      
+      const yamlBlob = new Blob([yamlContent], { type: 'application/x-yaml' });
       const yamlUrl = URL.createObjectURL(yamlBlob);
       const yamlLink = document.createElement('a');
       yamlLink.href = yamlUrl;
-      yamlLink.download = `${mapName || 'map'}_rotated_${rotation}_${SCALE_FACTOR}x.yaml`;
-      document.body.appendChild(yamlLink);
+      yamlLink.download = `${mapName || 'exported_map'}_rotated_${rotation}_${SCALE_FACTOR}x.yaml`;
       yamlLink.click();
-      document.body.removeChild(yamlLink);
-      URL.revokeObjectURL(yamlUrl);
       
-      alert(`✅ High-resolution map saved WITH REAL TRANSPARENCY!\n\n📁 Files:\n- ${mapName || 'map'}_rotated_${rotation}_${SCALE_FACTOR}x.png\n- ${mapName || 'map'}_rotated_${rotation}_${SCALE_FACTOR}x.yaml\n📊 Size: ${tempCanvas.width} x ${tempCanvas.height} pixels (${SCALE_FACTOR}x)\n📍 Resolution: ${newResolution.toFixed(6)} m/pixel\n🔄 Rotation: ${rotation}°\n🌫️ Transparent areas: ${transparentPixels} pixels (REAL transparency - check with transparency checker)\n📝 Annotations: ${nodes.length} nodes, ${arrows.length} arrows, ${zones.length} zones\n⚠️ Annotations NOT drawn on transparent areas`);
+      finalMat.delete();
+      
+      setTimeout(() => {
+        URL.revokeObjectURL(pgmUrl);
+        URL.revokeObjectURL(yamlUrl);
+      }, 100);
 
-    }, 'image/png', 1.0);
+      alert(`✅ High-resolution PGM map exported!\n\n📁 Files saved:\n- ${mapName || 'exported_map'}_rotated_${rotation}_${SCALE_FACTOR}x.pgm\n- ${mapName || 'exported_map'}_rotated_${rotation}_${SCALE_FACTOR}x.yaml`);
 
-  } catch (error) {
-    console.error('Error saving high-resolution map as PNG:', error);
-    alert('❌ Error saving high-resolution map as PNG. Check console for details.');
-  }
-};
+    } catch (error) {
+      console.error('Error exporting high-resolution PGM map:', error);
+      alert('❌ Error exporting high-resolution PGM map. Check console for details.');
+    }
+  };
+
   // --- Enhanced Erase Functions ---
   const eraseAtClient = (clientX, clientY) => {
     if (!mapMsg) return;
@@ -4994,10 +5504,8 @@ free_thresh: 0.25
   };
 
   const eraseObjectsAt = (canvasX, canvasY) => {
-    // Save state before erasing for undo
     saveToHistory();
     
-    // Check nodes first
     const node = findNodeAtCanvas(canvasX, canvasY, 8 / zoomState.scale);
     if (node) {
       setNodes((prev) => prev.filter((p) => p.id !== node.id));
@@ -5005,7 +5513,6 @@ free_thresh: 0.25
       return;
     }
     
-    // Check zones
     for (const z of zones) {
       const poly = z.points.map((p) => [p.canvasX, p.canvasY]);
       if (pointInPolygon([canvasX, canvasY], poly)) {
@@ -5018,7 +5525,6 @@ free_thresh: 0.25
   const eraseNoiseAt = (clientX, clientY) => {
     if (!editableMap || !canvasRef.current) return;
 
-    // Save state before erasing for undo
     saveToHistory();
 
     const canvasCoords = clientToCanvasCoords(clientX, clientY);
@@ -5178,474 +5684,93 @@ free_thresh: 0.25
     return points;
   };
 
-  // --- Save Map Functions (for full map) ---
-// --- Save Map Functions (for full map) ---
-// --- Save Map Functions (for full map) ---
-const saveMapToComputer = async () => {
-  if (!mapMsg || !mapParamsRef.current) {
-    alert("No map loaded to save!");
-    return;
-  }
-
-  if (!opencvLoaded) {
-    alert("OpenCV is still loading. Please wait a moment and try again.");
-    return;
-  }
-
-  try {
-    const { width, height } = mapMsg;
-    const { resolution, originX, originY } = mapParamsRef.current;
-    
-    const SCALE_FACTOR = 4;
-    const CHECKER_SIZE = 8; // Size of checkerboard squares
-    
-    // Create a temporary canvas for drawing everything
-    const tempCanvas = document.createElement('canvas');
-    const tempCtx = tempCanvas.getContext('2d');
-    
-    if (rotation === 90 || rotation === 270) {
-      tempCanvas.width = height * SCALE_FACTOR;
-      tempCanvas.height = width * SCALE_FACTOR;
-    } else {
-      tempCanvas.width = width * SCALE_FACTOR;
-      tempCanvas.height = height * SCALE_FACTOR;
-    }
-    
-    // Fill with white background (PGM needs white for free space)
-    tempCtx.fillStyle = 'white';
-    tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-    
-    tempCtx.save();
-    tempCtx.scale(SCALE_FACTOR, SCALE_FACTOR);
-    
-    if (rotation !== 0) {
-      const centerX = tempCanvas.width / (2 * SCALE_FACTOR);
-      const centerY = tempCanvas.height / (2 * SCALE_FACTOR);
-      tempCtx.translate(centerX, centerY);
-      tempCtx.rotate((rotation * Math.PI) / 180);
-      
-      if (rotation === 90) {
-        tempCtx.translate(-centerY, -centerX);
-      } else if (rotation === 180) {
-        tempCtx.translate(-centerX, -centerY);
-      } else if (rotation === 270) {
-        tempCtx.translate(-centerY, -centerX);
-      } else {
-        tempCtx.translate(-centerX, -centerY);
-      }
-    }
-
-    // Transform point helper function (same as saveMapAsPNG)
-    const transformPoint = (point) => {
-      if (rotation === 0) return { x: point.canvasX, y: point.canvasY };
-      
-      const nx = point.canvasX / width;
-      const ny = point.canvasY / height;
-      
-      let rotatedX, rotatedY;
-      
-      switch (rotation) {
-        case 90:
-          rotatedX = (1 - ny) * width;
-          rotatedY = nx * height;
-          break;
-        case 180:
-          rotatedX = (1 - nx) * width;
-          rotatedY = (1 - ny) * height;
-          break;
-        case 270:
-          rotatedX = ny * width;
-          rotatedY = (1 - nx) * height;
-          break;
-        default:
-          rotatedX = point.canvasX;
-          rotatedY = point.canvasY;
-      }
-      
-      return { x: rotatedX, y: rotatedY };
-    };
-
-    // Helper function to check if a point is in a deleted area (for annotation skipping)
-    const isPointDeleted = (canvasX, canvasY) => {
-      // Convert canvas coordinates to map coordinates
-      const mapX = Math.floor(canvasX);
-      const mapY = Math.floor(canvasY);
-      
-      if (mapX < 0 || mapX >= width || mapY < 0 || mapY >= height) {
-        return true; // Outside map is considered deleted
-      }
-      
-      const val = mapMsg.data[mapY * width + mapX];
-      return val === -2 || val === -3; // -2 or -3 means deleted/cropped
-    };
-
-    // STEP 1: Draw zones with deletion check (same as saveMapAsPNG)
-    zones.forEach((zone) => {
-      if (zone.points && zone.points.length >= 3) {
-        // Check if zone center is in deleted area (skip if true)
-        const centerX = zone.points.reduce((sum, p) => sum + transformPoint(p).x, 0) / zone.points.length;
-        const centerY = zone.points.reduce((sum, p) => sum + transformPoint(p).y, 0) / zone.points.length;
-        
-        if (isPointDeleted(centerX, centerY)) {
-          // Skip drawing zone if center is in deleted area
-          return;
-        }
-        
-        tempCtx.beginPath();
-        zone.points.forEach((point, idx) => {
-          const transformed = transformPoint(point);
-          if (idx === 0) tempCtx.moveTo(transformed.x, transformed.y);
-          else tempCtx.lineTo(transformed.x, transformed.y);
-        });
-        tempCtx.closePath();
-        
-        if (zone.type === 'keep_out') {
-          tempCtx.fillStyle = "rgba(0, 0, 0, 1.0)"; // Solid black
-          tempCtx.fill();
-        } else {
-          tempCtx.fillStyle = "rgba(100, 100, 100, 1.0)"; // Solid dark gray
-          tempCtx.fill();
-        }
-      }
-    });
-
-    // STEP 2: Draw the base map OVER the zones with CHECKERBOARD for deleted areas
-    const imageData = tempCtx.createImageData(width, height);
-    let checkerboardPixels = 0;
-    let deletedPixels = 0;
-    let occupiedPixels = 0;
-    let freePixels = 0;
-    let unknownPixels = 0;
-    
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const val = mapMsg.data[y * width + x];
-        const py = height - 1 - y;
-        const i = (py * width + x) * 4;
-
-        let gray;
-        if (val === -3 || val === -2) {
-          // CROPPED AREAS (value -3) or DELETED AREAS (-2) - DRAW CHECKERBOARD PATTERN
-          const isCheckered = ((Math.floor(x / CHECKER_SIZE) + Math.floor(y / CHECKER_SIZE)) % 2) === 0;
-          gray = isCheckered ? 180 : 220; // Checkerboard pattern (dark gray / light gray)
-          checkerboardPixels++;
-          deletedPixels++;
-        } else if (val === -1) {
-          gray = 205; // Unknown - medium gray
-          unknownPixels++;
-        } else if (val === 0) {
-          gray = 255; // Free space - white
-          freePixels++;
-        } else if (val === 100) {
-          gray = 0; // Occupied - black
-          occupiedPixels++;
-        } else {
-          gray = 255 - Math.floor((val / 100) * 255); // Grayscale based on occupancy
-          if (val > 50) occupiedPixels++;
-          else freePixels++;
-        }
-
-        imageData.data[i] = gray;
-        imageData.data[i + 1] = gray;
-        imageData.data[i + 2] = gray;
-        imageData.data[i + 3] = 255; // Fully opaque
-      }
-    }
-    
-    const offCanvas = document.createElement("canvas");
-    offCanvas.width = width;
-    offCanvas.height = height;
-    offCanvas.getContext("2d").putImageData(imageData, 0, 0);
-    tempCtx.drawImage(offCanvas, 0, 0, width, height);
-
-    // STEP 3: Draw arrows with deletion check (same as saveMapAsPNG)
-    arrows.forEach((arrow) => {
-      const fromNode = nodes.find(n => n.id === arrow.fromId);
-      const toNode = nodes.find(n => n.id === arrow.toId);
-      
-      if (fromNode && toNode) {
-        // Check if either endpoint is in deleted area
-        const fromTransformed = transformPoint(fromNode);
-        const toTransformed = transformPoint(toNode);
-        
-        if (isPointDeleted(fromTransformed.x, fromTransformed.y) || 
-            isPointDeleted(toTransformed.x, toTransformed.y)) {
-          // Skip drawing arrow if endpoints are in deleted areas
-          return;
-        }
-        
-        const allPoints = [fromNode, ...(arrow.points || []), toNode];
-        if (allPoints.length < 2) return;
-        
-        // Check all points for deletion
-        let hasDeletedPoint = false;
-        for (const point of allPoints) {
-          const transformed = transformPoint(point);
-          if (isPointDeleted(transformed.x, transformed.y)) {
-            hasDeletedPoint = true;
-            break;
-          }
-        }
-        
-        if (hasDeletedPoint) {
-          // Skip drawing arrow if any point is in deleted area
-          return;
-        }
-        
-        tempCtx.strokeStyle = "rgba(0, 0, 0, 1.0)"; // Solid black
-        tempCtx.lineWidth = 4 / SCALE_FACTOR;
-        tempCtx.lineJoin = 'round';
-        tempCtx.lineCap = 'round';
-        tempCtx.beginPath();
-        
-        const firstPoint = transformPoint(allPoints[0]);
-        tempCtx.moveTo(firstPoint.x, firstPoint.y);
-        
-        for (let i = 1; i < allPoints.length; i++) {
-          const point = transformPoint(allPoints[i]);
-          tempCtx.lineTo(point.x, point.y);
-        }
-        tempCtx.stroke();
-        
-        // Draw arrow head
-        const lastPoint = transformPoint(allPoints[allPoints.length - 1]);
-        const secondLastPoint = transformPoint(allPoints[allPoints.length - 2]);
-        const angle = Math.atan2(
-          lastPoint.y - secondLastPoint.y,
-          lastPoint.x - secondLastPoint.x
-        );
-        const headLength = 20 / SCALE_FACTOR;
-        
-        tempCtx.save();
-        tempCtx.translate(lastPoint.x, lastPoint.y);
-        tempCtx.rotate(angle);
-        tempCtx.beginPath();
-        tempCtx.moveTo(0, 0);
-        tempCtx.lineTo(-headLength, -headLength / 2);
-        tempCtx.lineTo(-headLength, headLength / 2);
-        tempCtx.closePath();
-        tempCtx.fillStyle = "rgba(0, 0, 0, 1.0)";
-        tempCtx.fill();
-        tempCtx.restore();
-      }
-    });
-
-    // STEP 4: Draw nodes with deletion check (same as saveMapAsPNG)
-    nodes.forEach((node) => {
-      const transformed = transformPoint(node);
-      
-      // Check if node is in deleted area
-      if (isPointDeleted(transformed.x, transformed.y)) {
-        // Skip drawing node if it's in deleted area
-        return;
-      }
-      
-      // Draw node as solid black circle
-      tempCtx.beginPath();
-      tempCtx.arc(transformed.x, transformed.y, 6 / SCALE_FACTOR, 0, Math.PI * 2);
-      tempCtx.fillStyle = "rgba(0, 0, 0, 1.0)";
-      tempCtx.fill();
-      
-      // Draw white border for contrast
-      tempCtx.beginPath();
-      tempCtx.arc(transformed.x, transformed.y, 6 / SCALE_FACTOR, 0, Math.PI * 2);
-      tempCtx.strokeStyle = "rgba(255, 255, 255, 1.0)";
-      tempCtx.lineWidth = 1 / SCALE_FACTOR;
-      tempCtx.stroke();
-    });
-
-    tempCtx.restore();
-
-    // Save debug preview as PNG to see the checkerboard
-    const debugUrl = tempCanvas.toDataURL('image/png');
-    const debugLink = document.createElement('a');
-    debugLink.href = debugUrl;
-    debugLink.download = 'debug_pgm_preview_with_checkerboard.png';
-    debugLink.click();
-
-    // Convert canvas to grayscale for PGM
-    const imageDataFromCanvas = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-    const finalMat = new cv.Mat(tempCanvas.height, tempCanvas.width, cv.CV_8UC1);
-    
-    for (let y = 0; y < tempCanvas.height; y++) {
-      for (let x = 0; x < tempCanvas.width; x++) {
-        const i = (y * tempCanvas.width + x) * 4;
-        const r = imageDataFromCanvas.data[i];
-        const g = imageDataFromCanvas.data[i + 1];
-        const b = imageDataFromCanvas.data[i + 2];
-        
-        const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-        finalMat.ucharPtr(y, x)[0] = gray;
-      }
-    }
-
-    const pgmHeader = `P5\n${tempCanvas.width} ${tempCanvas.height}\n255\n`;
-    const pgmData = new Uint8Array(tempCanvas.width * tempCanvas.height);
-    
-    for (let y = 0; y < tempCanvas.height; y++) {
-      for (let x = 0; x < tempCanvas.width; x++) {
-        pgmData[y * tempCanvas.width + x] = finalMat.ucharPtr(y, x)[0];
-      }
-    }
-
-    const pgmContent = new Uint8Array(pgmHeader.length + pgmData.length);
-    const encoder = new TextEncoder();
-    const headerBytes = encoder.encode(pgmHeader);
-    pgmContent.set(headerBytes);
-    pgmContent.set(pgmData, headerBytes.length);
-
-    // Update resolution in YAML to match the scaled image
-    const newResolution = resolution / SCALE_FACTOR;
-    const yamlContent = `image: ${mapName || 'exported_map'}_rotated_${rotation}_${SCALE_FACTOR}x.pgm
-mode: trinary
-resolution: ${newResolution.toFixed(6)}
-origin: [${originX}, ${originY}, 0]
-negate: 0
-occupied_thresh: 0.65
-free_thresh: 0.25
-# High-resolution PGM Export WITH CHECKERBOARD FOR DELETED AREAS
-# Original resolution: ${resolution} m/pixel
-# Scaled resolution: ${newResolution.toFixed(6)} m/pixel
-# Scale factor: ${SCALE_FACTOR}x
-# Original size: ${width}x${height} pixels
-# Scaled size: ${tempCanvas.width}x${tempCanvas.height} pixels
-# Rotation: ${rotation}°
-# Pixel Statistics:
-#   Checkerboard (deleted/cropped): ${checkerboardPixels} pixels
-#   Occupied (black): ${occupiedPixels} pixels
-#   Free (white): ${freePixels} pixels
-#   Unknown (gray): ${unknownPixels} pixels
-# Annotations: ${nodes.length} nodes, ${arrows.length} arrows, ${zones.length} zones
-# Zones: Black/dark gray (NOT drawn on deleted areas)
-# Arrows: Black lines (NOT drawn through deleted areas)
-# Nodes: Black circles with white border (NOT drawn on deleted areas)
-# Deleted areas (-2, -3): CHECKERBOARD PATTERN (180/220 gray)
-# Deleted pixels: ${deletedPixels} (${checkerboardPixels} shown as checkerboard)
-# Checkerboard pattern: ${CHECKER_SIZE}px squares alternating between gray 180 and 220
-# Note: In PNG export, these areas would be transparent
-# For PGM, checkerboard indicates "removed/not part of map"`;
-
-    const pgmBlob = new Blob([pgmContent], { type: 'image/x-portable-graymap' });
-    const pgmUrl = URL.createObjectURL(pgmBlob);
-    const pgmLink = document.createElement('a');
-    pgmLink.href = pgmUrl;
-    pgmLink.download = `${mapName || 'exported_map'}_rotated_${rotation}_${SCALE_FACTOR}x.pgm`;
-    document.body.appendChild(pgmLink);
-    pgmLink.click();
-    document.body.removeChild(pgmLink);
-    
-    const yamlBlob = new Blob([yamlContent], { type: 'application/x-yaml' });
-    const yamlUrl = URL.createObjectURL(yamlBlob);
-    const yamlLink = document.createElement('a');
-    yamlLink.href = yamlUrl;
-    yamlLink.download = `${mapName || 'exported_map'}_rotated_${rotation}_${SCALE_FACTOR}x.yaml`;
-    document.body.appendChild(yamlLink);
-    yamlLink.click();
-    document.body.removeChild(yamlLink);
-    
-    finalMat.delete();
-    
-    setTimeout(() => {
-      URL.revokeObjectURL(pgmUrl);
-      URL.revokeObjectURL(yamlUrl);
-    }, 100);
-
-    alert(`✅ High-resolution PGM map exported with CHECKERBOARD!\n\n📁 Files saved:\n- ${mapName || 'exported_map'}_rotated_${rotation}_${SCALE_FACTOR}x.pgm\n- ${mapName || 'exported_map'}_rotated_${rotation}_${SCALE_FACTOR}x.yaml\n- debug_pgm_preview_with_checkerboard.png (preview)\n🔄 Rotation: ${rotation}°\n📊 Size: ${tempCanvas.width} x ${tempCanvas.height} pixels (${SCALE_FACTOR}x)\n📍 Resolution: ${newResolution.toFixed(6)} m/pixel\n◻️ Deleted areas: CHECKERBOARD PATTERN (180/220 gray)\n🗑️ Deleted pixels: ${deletedPixels}\n⚫ Annotations: Black (zones, arrows, nodes)\n⚠️ Annotations NOT drawn on deleted areas`);
-
-  } catch (error) {
-    console.error('Error exporting high-resolution PGM map:', error);
-    alert('❌ Error exporting high-resolution PGM map. Check console for details.');
-  }
-};
   // --- Database Functions ---
   const saveNodesToDatabase = async () => {
-  if (nodes.length === 0 && arrows.length === 0 && zones.length === 0) {
-    alert("No nodes, arrows, or zones to save!");
-    return;
-  }
-
-  // Get current map name or use filename
-  const currentMapName = mapName || 
-    (yamlFile ? yamlFile.name.replace('.yaml', '').replace('.yml', '') : 'default');
-
-  try {
-    setIsSaving(true);
-    setDbStatus("Saving...");
-
-    const payload = {
-      mapName: currentMapName,
-      nodes: nodes,
-      arrows: arrows,
-      zones: zones,
-    };
-
-    const response = await fetch('http://localhost:5000/save-nodes', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (response.ok) {
-      const result = await response.json();
-      setDbStatus("Saved successfully!");
-      alert(`✅ Successfully saved to database!\n\n🗂️ Database: ${result.database_file}\n🏷️ Map: ${result.map_name}\n📁 File: ${result.database_path}`);
-    } else {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    if (nodes.length === 0 && arrows.length === 0 && zones.length === 0) {
+      alert("No nodes, arrows, or zones to save!");
+      return;
     }
-  } catch (error) {
-    console.error('❌ Error saving nodes to database:', error);
-    setDbStatus("Save failed!");
-    alert('❌ Error saving to database. Make sure Flask server is running on port 5000.');
-  } finally {
-    setIsSaving(false);
-  }
-};
 
- const loadNodesFromDatabase = async () => {
-  try {
-    // Get current map name or use filename
-    const mapNameToLoad = mapName || 
+    const currentMapName = mapName || 
       (yamlFile ? yamlFile.name.replace('.yaml', '').replace('.yml', '') : 'default');
-    
-    const response = await fetch(`http://localhost:5000/load-nodes?map_name=${mapNameToLoad}`);
-    
-    if (response.ok) {
-      const result = await response.json();
-      
-      if (result.status === "success") {
-        const mapNodes = result.nodes.map(dbNode => {
-          const canvasCoords = rosToCanvasCoords(dbNode.x, dbNode.y);
-          return {
-            id: `node_${dbNode.id}`,
-            type: dbNode.type,
-            label: dbNode.name,
-            rosX: dbNode.x,
-            rosY: dbNode.y,
-            canvasX: canvasCoords.x,
-            canvasY: canvasCoords.y,
-            dbId: dbNode.id
-          };
-        });
-        
-        setNodes(mapNodes);
-        setArrows(result.arrows || []);
-        setZones(result.zones || []);
-        
-        alert(`✅ Successfully loaded from database!\n\n📊 Nodes: ${result.nodes.length}\n➡️ Arrows: ${result.arrows.length}\n🗺️ Zones: ${result.zones.length}\n📁 Database: ${result.database_file}`);
+
+    try {
+      setIsSaving(true);
+      setDbStatus("Saving...");
+
+      const payload = {
+        mapName: currentMapName,
+        nodes: nodes,
+        arrows: arrows,
+        zones: zones,
+      };
+
+      const response = await fetch('http://localhost:5000/save-nodes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setDbStatus("Saved successfully!");
+        alert(`✅ Successfully saved to database!\n\n🗂️ Database: ${result.database_file}\n🏷️ Map: ${result.map_name}`);
       } else {
-        alert(`❌ Error: ${result.message}`);
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
-    } else {
-      const errorResult = await response.json();
-      alert(`❌ Error loading: ${errorResult.message}`);
+    } catch (error) {
+      console.error('❌ Error saving nodes to database:', error);
+      setDbStatus("Save failed!");
+      alert('❌ Error saving to database. Make sure Flask server is running on port 5000.');
+    } finally {
+      setIsSaving(false);
     }
-  } catch (error) {
-    console.error('❌ Error loading nodes from database:', error);
-    alert('❌ Error connecting to database server.');
-  }
-};
+  };
+
+  const loadNodesFromDatabase = async () => {
+    try {
+      const mapNameToLoad = mapName || 
+        (yamlFile ? yamlFile.name.replace('.yaml', '').replace('.yml', '') : 'default');
+      
+      const response = await fetch(`http://localhost:5000/load-nodes?map_name=${mapNameToLoad}`);
+      
+      if (response.ok) {
+        const result = await response.json();
+        
+        if (result.status === "success") {
+          const mapNodes = result.nodes.map(dbNode => {
+            const canvasCoords = rosToCanvasCoords(dbNode.x, dbNode.y);
+            return {
+              id: `node_${dbNode.id}`,
+              type: dbNode.type,
+              label: dbNode.name,
+              rosX: dbNode.x,
+              rosY: dbNode.y,
+              canvasX: canvasCoords.x,
+              canvasY: canvasCoords.y,
+              dbId: dbNode.id
+            };
+          });
+          
+          setNodes(mapNodes);
+          setArrows(result.arrows || []);
+          setZones(result.zones || []);
+          
+          alert(`✅ Successfully loaded from database!\n\n📊 Nodes: ${result.nodes.length}`);
+        } else {
+          alert(`❌ Error: ${result.message}`);
+        }
+      } else {
+        const errorResult = await response.json();
+        alert(`❌ Error loading: ${errorResult.message}`);
+      }
+    } catch (error) {
+      console.error('❌ Error loading nodes from database:', error);
+      alert('❌ Error connecting to database server.');
+    }
+  };
 
   // --- Coordinate conversions ---
   const rosToCanvasCoords = (rosX, rosY) => {
@@ -5899,7 +6024,6 @@ free_thresh: 0.25
       }));
     }
 
-    // Freehand crop drawing
     if (cropState.isDragging && tool === "crop") {
       const c = clientToCanvasCoords(e.clientX, e.clientY);
       setCropState(prev => ({
@@ -5961,53 +6085,52 @@ free_thresh: 0.25
       offsetY: centerY - zoomPointY * newScale
     }));
   };
-// Add these functions after your handleWheel function:
 
-const handleTouchStart = (e) => {
-  if (e.touches.length === 1) {
-    const touch = e.touches[0];
-    const rect = canvasRef.current.getBoundingClientRect();
-    const x = touch.clientX - rect.left;
-    const y = touch.clientY - rect.top;
-    
-    // Always allow panning with touch
+  const handleTouchStart = (e) => {
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      const rect = canvasRef.current.getBoundingClientRect();
+      const x = touch.clientX - rect.left;
+      const y = touch.clientY - rect.top;
+      
+      setZoomState(prev => ({
+        ...prev,
+        isDragging: true,
+        lastX: x,
+        lastY: y
+      }));
+    }
+    e.preventDefault();
+  };
+
+  const handleTouchMove = (e) => {
+    if (e.touches.length === 1 && zoomState.isDragging) {
+      const touch = e.touches[0];
+      const rect = canvasRef.current.getBoundingClientRect();
+      const x = touch.clientX - rect.left;
+      const y = touch.clientY - rect.top;
+
+      const deltaX = x - zoomState.lastX;
+      const deltaY = y - zoomState.lastY;
+      
+      setZoomState(prev => ({
+        ...prev,
+        offsetX: prev.offsetX + deltaX,
+        offsetY: prev.offsetY + deltaY,
+        lastX: x,
+        lastY: y
+      }));
+    }
+    e.preventDefault();
+  };
+
+  const handleTouchEnd = () => {
     setZoomState(prev => ({
       ...prev,
-      isDragging: true,
-      lastX: x,
-      lastY: y
+      isDragging: false
     }));
-  }
-  e.preventDefault();
-};
+  };
 
-const handleTouchMove = (e) => {
-  if (e.touches.length === 1 && zoomState.isDragging) {
-    const touch = e.touches[0];
-    const rect = canvasRef.current.getBoundingClientRect();
-    const x = touch.clientX - rect.left;
-    const y = touch.clientY - rect.top;
-
-    const deltaX = x - zoomState.lastX;
-    const deltaY = y - zoomState.lastY;
-    
-    setZoomState(prev => ({
-      ...prev,
-      offsetX: prev.offsetX + deltaX,
-      offsetY: prev.offsetY + deltaY,
-      lastX: x,
-      lastY: y
-    }));
-  }
-  e.preventDefault();
-};
-
-const handleTouchEnd = () => {
-  setZoomState(prev => ({
-    ...prev,
-    isDragging: false
-  }));
-};
   const handleButtonZoom = (zoomFactor) => {
     if (!mapMsg || !canvasRef.current) return;
     
@@ -6080,18 +6203,15 @@ const handleTouchEnd = () => {
       setRotation(0);
     }
   };
-// Add keyboard shortcuts after your other useEffect hooks
 
-  // Add keyboard shortcuts after your other useEffect hooks
+  // --- Keyboard shortcuts ---
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // Spacebar for temporary pan tool
       if (e.code === 'Space' && !e.repeat) {
         e.preventDefault();
         const prevTool = tool;
         setTool("pan");
         
-        // Store previous tool to restore it when space is released
         const restoreTool = (e) => {
           if (e.code === 'Space') {
             setTool(prevTool);
@@ -6101,34 +6221,27 @@ const handleTouchEnd = () => {
         window.addEventListener('keyup', restoreTool);
       }
       
-      // Ctrl+Z for undo, Ctrl+Shift+Z or Ctrl+Y for redo
       if (e.ctrlKey) {
         if (e.key === 'z' || e.key === 'Z') {
           e.preventDefault();
           if (e.shiftKey) {
-            // Ctrl+Shift+Z for redo
             handleRedo();
           } else {
-            // Ctrl+Z for undo
             handleUndo();
           }
         }
         if (e.key === 'y' || e.key === 'Y') {
           e.preventDefault();
-          // Ctrl+Y for redo
           handleRedo();
         }
       }
       
-      // Alternative: Cmd+Z and Cmd+Shift+Z for Mac
       if (e.metaKey) {
         if (e.key === 'z' || e.key === 'Z') {
           e.preventDefault();
           if (e.shiftKey) {
-            // Cmd+Shift+Z for redo
             handleRedo();
           } else {
-            // Cmd+Z for undo
             handleUndo();
           }
         }
@@ -6140,7 +6253,7 @@ const handleTouchEnd = () => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [tool, handleUndo, handleRedo]); // Now these functions are stable
+  }, [tool]);
 
   // --- ROS connection ---
   useEffect(() => {
@@ -6250,40 +6363,33 @@ const handleTouchEnd = () => {
     ctx.translate(zoomState.offsetX, zoomState.offsetY);
     ctx.scale(zoomState.scale, zoomState.scale);
 
-    // Draw base map
-   // In the main useEffect for drawing:
-// Draw base map
-// Draw base map
-const imageData = ctx.createImageData(width, height);
-for (let y = 0; y < height; y++) {
-  for (let x = 0; x < width; x++) {
-    const val = data[y * width + x];
-    const py = height - 1 - y;
-    const i = (py * width + x) * 4;
+    const imageData = ctx.createImageData(width, height);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const val = data[y * width + x];
+        const py = height - 1 - y;
+        const i = (py * width + x) * 4;
 
-// In the imageData creation loop:
-let gray, alpha = 255;
-if (val === -3) {
-  // NEW: True transparency (for cropped areas)
-  gray = 255; // White
-  alpha = 0;  // Fully transparent
-} else if (val === -2) {
-  // Keep checkerboard for old deleted areas if you want
-  const checkerSize = 8;
-  const isCheckered = ((Math.floor(x / checkerSize) + Math.floor(y / checkerSize)) % 2) === 0;
-  gray = isCheckered ? 180 : 220;
-  alpha = 255;
-} else if (val === -1) gray = 205;
-else if (val === 0) gray = 255;
-else if (val === 100) gray = 0;
-else gray = 255 - Math.floor((val / 100) * 255);
+        let gray, alpha = 255;
+        if (val === -3) {
+          gray = 255;
+          alpha = 0;
+        } else if (val === -2) {
+          const checkerSize = 8;
+          const isCheckered = ((Math.floor(x / checkerSize) + Math.floor(y / checkerSize)) % 2) === 0;
+          gray = isCheckered ? 180 : 220;
+          alpha = 255;
+        } else if (val === -1) gray = 205;
+        else if (val === 0) gray = 255;
+        else if (val === 100) gray = 0;
+        else gray = 255 - Math.floor((val / 100) * 255);
 
-imageData.data[i] = gray;
-imageData.data[i + 1] = gray;
-imageData.data[i + 2] = gray;
-imageData.data[i + 3] = alpha; // This controls transparency
-  }
-}
+        imageData.data[i] = gray;
+        imageData.data[i + 1] = gray;
+        imageData.data[i + 2] = gray;
+        imageData.data[i + 3] = alpha;
+      }
+    }
 
     const off = document.createElement("canvas");
     off.width = width;
@@ -6291,7 +6397,6 @@ imageData.data[i + 3] = alpha; // This controls transparency
     off.getContext("2d").putImageData(imageData, 0, 0);
     ctx.drawImage(off, 0, 0, width, height);
 
-    // Draw freehand crop selection
     if (cropState.isCropping && cropState.freehandPoints.length > 0) {
       ctx.strokeStyle = '#00ff00';
       ctx.lineWidth = 2 / zoomState.scale;
@@ -6320,16 +6425,8 @@ imageData.data[i + 3] = alpha; // This controls transparency
         ctx.closePath();
         ctx.fill();
       }
-
-      if (cropState.freehandPoints.length > 0) {
-        const lastPoint = cropState.freehandPoints[cropState.freehandPoints.length - 1];
-        ctx.fillStyle = '#00ff00';
-        ctx.font = `${12 / zoomState.scale}px Arial`;
-        ctx.fillText(`${cropState.freehandPoints.length} points`, lastPoint.x + 5, lastPoint.y - 5);
-      }
     }
 
-    // Draw zones
     zones.forEach((z) => {
       if (!z.points || z.points.length < 2) return;
       ctx.beginPath();
@@ -6365,7 +6462,6 @@ imageData.data[i + 3] = alpha; // This controls transparency
       ctx.fillText(z.name, cx + 6 / zoomState.scale, cy);
     });
 
-    // Current zone points
     if (currentZonePoints.length) {
       ctx.beginPath();
       currentZonePoints.forEach((p, idx) => {
@@ -6383,7 +6479,6 @@ imageData.data[i + 3] = alpha; // This controls transparency
       ctx.stroke();
     }
 
-    // Draw arrows
     arrows.forEach((a) => {
       const from = nodes.find((n) => n.id === a.fromId);
       const to = nodes.find((n) => n.id === a.toId);
@@ -6436,7 +6531,6 @@ imageData.data[i + 3] = alpha; // This controls transparency
       }
     });
 
-    // Draw the currently-being-drawn arrow
     if (arrowDrawing.isDrawing) {
       const from = nodes.find((n) => n.id === arrowDrawing.fromId);
       if (from && cursorCoords) {
@@ -6466,7 +6560,6 @@ imageData.data[i + 3] = alpha; // This controls transparency
       }
     }
 
-    // Draw nodes
     nodes.forEach((n) => {
       ctx.beginPath();
       ctx.fillStyle = currentTheme.nodeColors[n.type] || "#1e40af";
@@ -6477,7 +6570,6 @@ imageData.data[i + 3] = alpha; // This controls transparency
       ctx.fillText(n.label || n.type, n.canvasX + 8 / zoomState.scale, n.canvasY - 6 / zoomState.scale);
     });
 
-    // Hover crosshair
     if (cursorCoords) {
       ctx.strokeStyle = "rgba(0,0,0,0.4)";
       ctx.lineWidth = 0.5 / zoomState.scale;
@@ -6490,7 +6582,7 @@ imageData.data[i + 3] = alpha; // This controls transparency
     }
 
     ctx.restore();
-  }, [mapMsg, editableMap, zoomState, nodes, arrows, zones, currentZonePoints, cursorCoords, currentTheme, rotation, arrowDrawing, cropState, zoneType, tool, eraseMode, eraseRadius]);
+  }, [mapMsg, editableMap, zoomState, nodes, arrows, zones, currentZonePoints, cursorCoords, currentTheme, rotation, arrowDrawing, cropState, zoneType, tool]);
 
   // Map Loader Modal
   const MapLoaderModal = () => {
@@ -6650,7 +6742,7 @@ imageData.data[i + 3] = alpha; // This controls transparency
 
         clearHistory();
 
-        alert(`✅ Map loaded successfully!\n\n📦 Source: ZIP archive\n📊 Size: ${width} x ${height} pixels\n📍 Resolution: ${parsedYaml.resolution} m/pixel`);
+        alert(`✅ Map loaded successfully!\n\n📦 Source: ZIP archive\n📊 Size: ${width} x ${height} pixels`);
 
       } catch (err) {
         console.error("Error loading map:", err);
@@ -6717,29 +6809,9 @@ imageData.data[i + 3] = alpha; // This controls transparency
               </div>
             </label>
             <div style={styles.hint}>
-              Select a ZIP file containing both YAML and PGM map files. The map will load automatically.
+              Select a ZIP file containing both YAML and PGM map files.
             </div>
           </div>
-
-          {mapInfo && (
-            <div style={{
-              marginBottom: 15,
-              padding: 10,
-              background: currentTheme.surface,
-              borderRadius: 8,
-              border: `1px solid ${currentTheme.border}`,
-            }}>
-              <h4 style={{ margin: '0 0 8px 0', color: currentTheme.text }}>Map Info:</h4>
-              <pre style={{ margin: 0, fontSize: "12px", color: currentTheme.textSecondary }}>
-                {JSON.stringify(mapInfo, null, 2)}
-              </pre>
-              {mapInfo.image && (
-                <div style={{ marginTop: 8, fontSize: "12px", color: currentTheme.accent }}>
-                  📄 PGM File: {mapInfo.image}
-                </div>
-              )}
-            </div>
-          )}
 
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
             <button 
@@ -6761,558 +6833,474 @@ imageData.data[i + 3] = alpha; // This controls transparency
     <div style={styles.container}>
       {mapLoaderActive && <MapLoaderModal />}
 
-      <div style={styles.sidebar}>
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <h3 style={{ margin: 0, color: currentTheme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <FaMapMarkerAlt style={{ color: currentTheme.accent }} />
-              Map Editor {opencvLoaded ? "✓" : "⏳"}
-            </h3>
-            <button 
-              onClick={toggleDarkMode}
-              style={{
-                ...styles.smallButton,
-                background: 'transparent',
-                color: currentTheme.text,
-                border: `1px solid ${currentTheme.border}`
-              }}
-              title={darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
-            >
-              {darkMode ? <FaSun size={14} /> : <FaMoon size={14} />}
-            </button>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <h1 style={{ margin: 0, color: currentTheme.text, fontSize: '24px' }}>
+            <FaMapMarkerAlt style={{ color: currentTheme.accent, marginRight: 8 }} />
+            Map Editor
+          </h1>
+          <div style={styles.status}>
+            <div style={{ 
+              width: 8, 
+              height: 8, 
+              borderRadius: '50%', 
+              background: 'currentColor',
+              opacity: rosConnected ? 1 : 0.5
+            }} />
+            {rosConnected ? "ROS Connected" : "ROS Disconnected"}
           </div>
-          <div style={{ fontSize: 12, color: currentTheme.textSecondary }}>
-            {darkMode ? 'Dark' : 'Light'} mode • {opencvLoaded ? 'OpenCV Ready' : 'Loading OpenCV...'}
+          <div style={styles.mapInfo}>
+            Map: {mapName || "—"}
           </div>
-        </div>
-
-        <label style={styles.label}>Map name</label>
-        <input 
-          value={mapName} 
-          onChange={(e) => setMapName(e.target.value)} 
-          placeholder="My Map" 
-          style={styles.input} 
-        />
-
-        {/* Undo/Redo Controls */}
-        <div style={{ marginBottom: 16 }}>
-          <label style={styles.label}>Undo/Redo</label>
-          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-            <button 
-              onClick={handleUndo} 
-              style={{
-                ...styles.buttonUndoRedo,
-                opacity: historyIndex > 0 ? 1 : 0.5,
-                cursor: historyIndex > 0 ? "pointer" : "not-allowed"
-              }}
-              disabled={historyIndex <= 0}
-              title="Undo last action"
-            >
-              <FaUndo />
-              Undo
-            </button>
-            <button 
-              onClick={handleRedo} 
-              style={{
-                ...styles.buttonUndoRedo,
-                opacity: historyIndex < history.length - 1 ? 1 : 0.5,
-                cursor: historyIndex < history.length - 1 ? "pointer" : "not-allowed"
-              }}
-              disabled={historyIndex >= history.length - 1}
-              title="Redo last undone action"
-            >
-              <FaRedoAlt />
-              Redo
-            </button>
+          <div style={styles.mapInfo}>
+            Rotation: {rotation}°
           </div>
-          <div style={styles.hint}>
-            History: {historyIndex + 1}/{history.length} steps
+          <div style={styles.mapInfo}>
+            OpenCV: {opencvLoaded ? "✓" : "⏳"}
           </div>
         </div>
-
-       <div style={{ marginBottom: 16 }}>
-  <label style={styles.label}>Tools</label>
-  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
-    {/* Hand (Pan) Tool - NEW */}
-    <button 
-      onClick={() => setTool("pan")} 
-      style={tool === "pan" ? styles.buttonActive : styles.button}
-      title="Drag to pan the map (Middle mouse button also works)"
-    >
-      <FaHandPaper />
-      Pan
-    </button>
-    
-    <button 
-      onClick={() => setTool("place_node")} 
-      style={tool === "place_node" ? styles.buttonActive : styles.button}
-    >
-      <FaMapMarkerAlt />
-      Node
-    </button>
-    <button 
-      onClick={() => setTool("connect")} 
-      style={tool === "connect" ? styles.buttonActive : styles.button}
-    >
-      <FaArrowRight />
-      Arrow
-    </button>
-    <button 
-      onClick={() => setTool("zone")} 
-      style={tool === "zone" ? styles.buttonActive : styles.button}
-    >
-      <FaDrawPolygon />
-      Zone
-    </button>
-    <button 
-      onClick={() => setTool("erase")} 
-      style={tool === "erase" ? styles.buttonActive : styles.button}
-    >
-      <FaEraser />
-      Erase
-    </button>
-    <button 
-      onClick={startCrop} 
-      style={tool === "crop" ? styles.buttonActive : styles.button}
-    >
-      <FaCropAlt />
-      Crop
-    </button>
-    <button 
-      onClick={() => {
-        setTool("zone");
-        setZoneType("keep_out");
-      }} 
-      style={zoneType === "keep_out" ? styles.buttonKeepOut : styles.button}
-    >
-      <FaBan />
-      Restricted Zone
-    </button>
-  </div>
-</div>
-        {/* Erase Mode Controls */}
-        {tool === "erase" && (
-          <div style={{ marginBottom: 16, padding: 12, background: currentTheme.surface, borderRadius: 8, border: `2px solid ${currentTheme.accent}` }}>
-            <div style={{...styles.label, color: currentTheme.accent, marginBottom: 8 }}>
-              🧹 Erase Mode: {eraseMode === "objects" ? "Objects" : eraseMode === "noise" ? "Map Noise (Click)" : "Hand Erase (Draw)"}
-            </div>
-            
-            <div style={{ marginBottom: 12 }}>
-              <label style={styles.label}>Erase Mode</label>
-              <select 
-                value={eraseMode} 
-                onChange={(e) => setEraseMode(e.target.value)} 
-                style={styles.select}
-              >
-                <option value="objects">🗑️ Erase Objects (Nodes, Zones)</option>
-                <option value="noise">🧹 Erase Map Noise (Click)</option>
-                <option value="hand">✋ Hand Erase (Draw Freely)</option>
-              </select>
-            </div>
-
-            {(eraseMode === "noise" || eraseMode === "hand") && (
-              <div style={{ marginBottom: 12 }}>
-                <label style={styles.label}>Erase Radius: {eraseRadius}px</label>
-                <input 
-                  type="range"
-                  min="1"
-                  max="20"
-                  value={eraseRadius}
-                  onChange={(e) => setEraseRadius(parseInt(e.target.value))}
-                  style={{ width: '100%', marginTop: 6 }}
-                />
-                <div style={styles.hint}>
-                  {eraseMode === "hand" 
-                    ? "Draw freely to erase black noise areas"
-                    : "Larger radius for cleaning large noise areas"}
-                </div>
-              </div>
-            )}
-
-            <div style={styles.hint}>
-              {eraseMode === "objects" 
-                ? "Click on nodes or zones to delete them"
-                : eraseMode === "noise"
-                ? `Click on black noise areas to erase them (${eraseRadius}px radius)`
-                : `Click and drag to draw erase paths (${eraseRadius}px radius)`}
-            </div>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={styles.hud}>
+            {cursorCoords ? `ROS: ${cursorCoords.rosX.toFixed(2)}, ${cursorCoords.rosY.toFixed(2)}` : "Hover map for coordinates"}
           </div>
-        )}
-
-        {/* Crop Controls */}
-        {cropState.isCropping && (
-          <div style={{ marginBottom: 16, padding: 12, background: currentTheme.surface, borderRadius: 8, border: `2px solid ${currentTheme.accent}` }}>
-            
-            <div style={{...styles.label, color: currentTheme.accent, marginBottom: 8 }}>
-              ✂️ Crop Mode Active
-            </div>
-
-            <div style={styles.hint}>
-              Draw a freehand selection around the area you want to KEEP.
-            </div>
-
-            <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-              
-              {/* Apply Crop (visual checkerboard) */}
-              <button
-                onClick={handleApplyCrop}
-                style={{
-                  ...styles.buttonAction,
-                  background: '#10b981',
-                  border: '1px solid #059669'
-                }}
-                disabled={!cropState.freehandPoints || cropState.freehandPoints.length < 3}
-                title="Apply crop to current map (checkerboard for deleted areas)"
-              >
-                <FaCropAlt />
-                Apply Crop
-              </button>
-
-           
-              {/* Cancel */}
-              <button 
-                onClick={cancelCrop}
-                style={styles.buttonDanger}
-              >
-                <FaBan />
-                Cancel
-              </button>
-            </div>
-
-            {cropState.freehandPoints && (
-              <div style={{ marginTop: 8, fontSize: '12px', color: currentTheme.textSecondary }}>
-                Points: {cropState.freehandPoints.length} (need 3+)
-              </div>
-            )}
-
-            <div style={{ marginTop: 12, padding: 8, background: currentTheme.background, borderRadius: 4 }}>
-              <div style={{ fontSize: '11px', color: currentTheme.textSecondary, lineHeight: 1.4 }}>
-                <strong>Apply Crop:</strong> Marks deleted areas as checkerboard in current map.<br/>
-                <strong>Export True Crop:</strong> Creates new map with deleted areas completely removed (reduced map size).
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div style={{ marginBottom: 16 }}>
-          <label style={styles.label}>Node type</label>
-          <select 
-            value={nodeType} 
-            onChange={(e) => setNodeType(e.target.value)} 
-            style={styles.select}
+          <button 
+            onClick={toggleDarkMode}
+            style={{
+              ...styles.buttonSmall,
+              background: 'transparent',
+              color: currentTheme.text,
+              border: `1px solid ${currentTheme.border}`
+            }}
+            title={darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
           >
-            <option value="station">🏭 Station</option>
-            <option value="docking">📍 Docking Point</option>
-            <option value="waypoint">🚩 Waypoint</option>
-            <option value="home">🏠 Home Position</option>
-            <option value="charging">🔋 Charging Station</option>
-          </select>
-          <div style={styles.hint}>
-            Click on map to place {nodeType} node
-          </div>
-        </div>
-
-        <div style={{ marginBottom: 16 }}>
-          <label style={styles.label}>Zone name</label>
-          <input 
-            value={zoneName} 
-            onChange={(e) => setZoneName(e.target.value)} 
-            placeholder="Zone A" 
-            style={styles.input} 
-          />
-          <div style={styles.hint}>
-            Click to add polygon points, then finish zone
-          </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-            <button onClick={finishZone} style={styles.button}>
-              <FaDrawPolygon />
-              Finish Zone
-            </button>
-            <button onClick={() => setCurrentZonePoints([])} style={styles.button}>
-              <FaTrashAlt />
-              Cancel Zone
-            </button>
-          </div>
-        </div>
-
-        {/* Arrow Drawing Controls */}
-        {arrowDrawing.isDrawing && (
-          <div style={{ marginBottom: 16, padding: 12, background: currentTheme.surface, borderRadius: 8, border: `2px solid ${currentTheme.accent}` }}>
-            <div style={{...styles.label, color: currentTheme.accent, marginBottom: 8 }}>
-              Drawing Arrow...
-            </div>
-            <div style={styles.hint}>
-              Click on empty space to add bend points
-            </div>
-            <button 
-              onClick={cancelArrowDrawing}
-              style={{...styles.buttonDanger, marginTop: 8 }}
-            >
-              <FaTrashAlt />
-              Cancel Arrow
-            </button>
-          </div>
-        )}
-
-        {/* Rotation Control Section */}
-        <div style={{ marginBottom: 16 }}>
-          <label style={styles.label}>Map Rotation</label>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input 
-              type="number"
-              min="0"
-              max="359"
-              value={rotation}
-              onChange={handleRotationInput}
-              style={{
-                ...styles.input,
-                margin: 0,
-                flex: 1,
-                textAlign: 'center'
-              }}
-              placeholder="Enter degrees (0-359)"
-            />
-            <span style={{ 
-              fontSize: '14px', 
-              color: currentTheme.textSecondary,
-              minWidth: '30px'
-            }}>
-              °
-            </span>
-          </div>
-          <div style={styles.hint}>
-            Enter rotation angle (0-359 degrees)
-          </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button onClick={handleRotate} style={styles.button}>
-              <FaRedo />
-              +90°
-            </button>
-            <button 
-              onClick={() => setRotation(0)} 
-              style={styles.button}
-            >
-              <FaExpand />
-              Reset
-            </button>
-          </div>
-        </div>
-
-        <div style={{ marginBottom: 16 }}>
-          <label style={styles.label}>Map Operations</label>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button 
-              onClick={() => setMapLoaderActive(true)} 
-              style={styles.buttonAction}
-            >
-              <FaUpload />
-              Load Map
-            </button>
-            <button onClick={saveNodesToDatabase} style={styles.buttonAction}>
-              <FaSave />
-              Save to DB
-            </button>
-            <button onClick={loadNodesFromDatabase} style={styles.buttonAction}>
-              <FaUpload />
-              Load from DB
-            </button>
-            <button 
-              onClick={saveMapToComputer} 
-              style={styles.buttonAction}
-              disabled={!opencvLoaded}
-            >
-              <FaDownload />
-              {opencvLoaded ? "Save Full Map" : "Loading OpenCV..."}
-            </button>
-            <button 
-              onClick={saveMapAsPNG} 
-              style={styles.buttonAction}
-            >
-              <FaImage />
-              Save Full PNG
-            </button>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-          <button onClick={handleSaveJSON} style={styles.button}>
-            <FaSave />
-            Save JSON
-          </button>
-          <label style={{...styles.button, cursor: 'pointer', textAlign: 'center'}}>
-            <FaUpload />
-            Upload JSON
-            <input type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => handleUploadJSON(e.target.files?.[0])} />
-          </label>
-          <button onClick={handleClearAll} style={styles.buttonDanger}>
-            <FaTrashAlt />
-            Clear All
+            {darkMode ? <FaSun size={14} /> : <FaMoon size={14} />}
           </button>
         </div>
       </div>
 
-      <div style={{ flex: 1 }}>
-        <div style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={styles.hud}>
-            {cursorCoords ? `ROS: ${cursorCoords.rosX.toFixed(2)}, ${cursorCoords.rosY.toFixed(2)}` : "Hover map for coordinates"}
+      <div style={styles.mainContent}>
+        <div style={styles.sidebar}>
+          <div style={styles.buttonGroup}>
+            <label style={styles.label}>Map Name</label>
+            <input 
+              value={mapName} 
+              onChange={(e) => setMapName(e.target.value)} 
+              placeholder="My Map" 
+              style={styles.input} 
+            />
           </div>
-          <div style={{ display: "flex", gap: 8, alignItems: 'center' }}>
-            <div style={styles.status}>
-              <div style={{ 
-                width: 8, 
-                height: 8, 
-                borderRadius: '50%', 
-                background: 'currentColor',
-                opacity: rosConnected ? 1 : 0.5
-              }} />
-              {rosConnected ? "ROS Connected" : "ROS Disconnected"}
+
+          <div style={styles.buttonGroup}>
+            <label style={styles.label}>Undo/Redo</label>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <button 
+                onClick={handleUndo} 
+                style={{
+                  ...styles.button,
+                  opacity: historyIndex > 0 ? 1 : 0.5,
+                  cursor: historyIndex > 0 ? "pointer" : "not-allowed"
+                }}
+                disabled={historyIndex <= 0}
+                title="Undo last action (Ctrl+Z)"
+              >
+                <FaUndo />
+                Undo
+              </button>
+              <button 
+                onClick={handleRedo} 
+                style={{
+                  ...styles.button,
+                  opacity: historyIndex < history.length - 1 ? 1 : 0.5,
+                  cursor: historyIndex < history.length - 1 ? "pointer" : "not-allowed"
+                }}
+                disabled={historyIndex >= history.length - 1}
+                title="Redo last undone action (Ctrl+Y)"
+              >
+                <FaRedoAlt />
+                Redo
+              </button>
             </div>
-            <div style={styles.mapInfo}>
-              Map: {mapName || "—"}
+            <div style={styles.hint}>
+              History: {historyIndex + 1}/{history.length} steps
             </div>
-            <div style={styles.mapInfo}>
-              Rotation: {rotation}°
+          </div>
+
+          <div style={styles.buttonGroup}>
+            <label style={styles.label}>Map Operations</label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button 
+                onClick={() => setMapLoaderActive(true)} 
+                style={styles.buttonAction}
+              >
+                <FaUpload />
+                Load Map
+              </button>
+              <button 
+                onClick={saveMapToComputer} 
+                style={styles.buttonAction}
+                disabled={!opencvLoaded}
+              >
+                <FaDownload />
+                {opencvLoaded ? "Save PGM Map" : "Loading OpenCV..."}
+              </button>
+              <button 
+                onClick={saveMapAsPNG} 
+                style={styles.buttonAction}
+              >
+                <FaImage />
+                Save PNG Map
+              </button>
             </div>
-            <div style={styles.mapInfo}>
-              OpenCV: {opencvLoaded ? "✓" : "⏳"}
+          </div>
+
+          <div style={styles.buttonGroup}>
+            <label style={styles.label}>Database</label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button onClick={saveNodesToDatabase} style={styles.buttonAction}>
+                <FaDatabase />
+                Save to DB
+              </button>
+              <button onClick={loadNodesFromDatabase} style={styles.buttonAction}>
+                <FaDatabase />
+                Load from DB
+              </button>
             </div>
-            {tool === "erase" && (
-              <div style={styles.mapInfo}>
-                Erase: {eraseMode === "objects" ? "Objects" : eraseMode === "noise" ? `Noise (${eraseRadius}px)` : `Hand (${eraseRadius}px)`}
-              </div>
-            )}
-            {tool === "crop" && (
-              <div style={styles.mapInfo}>
-                Crop: {cropState.freehandPoints?.length || 0} points
-              </div>
-            )}
-            <div style={styles.mapInfo}>
-              History: {historyIndex + 1}/{history.length}
+          </div>
+
+          <div style={styles.buttonGroup}>
+            <label style={styles.label}>Export/Import</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={handleSaveJSON} style={styles.button}>
+                <FaFileExport />
+                Export JSON
+              </button>
+              <label style={{...styles.button, cursor: 'pointer', textAlign: 'center'}}>
+                <FaUpload />
+                Import JSON
+                <input type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => handleUploadJSON(e.target.files?.[0])} />
+              </label>
             </div>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <button onClick={handleClearAll} style={styles.buttonDanger}>
+              <FaTrashAlt />
+              Clear All Annotations
+            </button>
           </div>
         </div>
 
-        <div style={styles.canvasContainer}>
-          <div style={{
-            position: "absolute",
-            top: 12,
-            right: 12,
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            zIndex: 20,
-            background: currentTheme.card,
-            padding: 22,
-            borderRadius: 12,
-            boxShadow: "0 6px 18px rgba(0,0,0,0.15)",
-            border: `1px solid ${currentTheme.border}`
-          }}>
-            <div style={{ 
-              textAlign: "center", 
-              fontSize: 13, 
-              fontWeight: '700', 
-              color: currentTheme.text,
-              marginBottom: 4 
-            }}>
-              {Math.round(zoomState.scale * 100)}%
+        <div style={styles.mapContainer}>
+          <div style={styles.canvasContainer}>
+            <div style={styles.zoomControls}>
+              <div style={{ 
+                textAlign: "center", 
+                fontSize: 13, 
+                fontWeight: '700', 
+                color: currentTheme.text,
+                marginBottom: 4 
+              }}>
+                {Math.round(zoomState.scale * 100)}%
+              </div>
+              <button 
+                onClick={() => handleButtonZoom(1.2)}
+                style={styles.zoomButton}
+                title="Zoom In"
+              >
+                <FaSearchPlus />
+              </button>
+              <button 
+                onClick={() => handleButtonZoom(0.8)}
+                style={styles.zoomButton}
+                title="Zoom Out"
+              >
+                <FaSearchMinus />
+              </button>
+              <button 
+                onClick={() => {
+                  if (!mapMsg || !canvasRef.current) return;
+                  const container = canvasRef.current.parentElement;
+                  const offsetX = (container.clientWidth - mapMsg.width) / 2;
+                  const offsetY = (container.clientHeight - mapMsg.height) / 2;
+                  setZoomState((p) => ({ ...p, scale: 1, offsetX, offsetY }));
+                }} 
+                style={styles.zoomButton}
+                title="Reset View"
+              >
+                <FaExpand />
+              </button>
             </div>
-            <button 
-              onClick={() => handleButtonZoom(1.2)}
-              style={styles.smallButton}
-              title="Zoom In"
-            >
-              <FaSearchPlus />
-            </button>
-            <button 
-              onClick={() => handleButtonZoom(0.8)}
-              style={styles.smallButton}
-              title="Zoom Out"
-            >
-              <FaSearchMinus />
-            </button>
-            {/* <button 
-              onClick={handleRotate}
-              style={styles.smallButton}
-              title="Rotate 90°"
-            >
-              <FaRedo />
-            </button> */}
-            <button 
-              onClick={() => {
-                if (!mapMsg || !canvasRef.current) return;
-                const container = canvasRef.current.parentElement;
-                const offsetX = (container.clientWidth - mapMsg.width) / 2;
-                const offsetY = (container.clientHeight - mapMsg.height) / 2;
-                setZoomState((p) => ({ ...p, scale: 1, offsetX, offsetY }));
-                setRotation(0);
-              }} 
-              style={styles.smallButton}
-              title="Reset View"
-            >
-              <FaExpand />
-            </button>
-            <button 
-              onClick={handleUndo}
-              style={{
-                ...styles.smallButton,
-                opacity: historyIndex > 0 ? 1 : 0.5,
-                cursor: historyIndex > 0 ? "pointer" : "not-allowed",
-                background: 'transparent',
-                color: currentTheme.text,
-                border: `1px solid ${currentTheme.border}`
+
+            <canvas
+              ref={canvasRef}
+              style={{ 
+                width: "100%", 
+                height: "100%", 
+                display: "block", 
+                cursor: tool === "pan" ? (zoomState.isDragging ? "grabbing" : "grab") :
+                        cropState.isCropping ? "crosshair" : 
+                        tool === "erase" && eraseMode === "hand" ? "crosshair" : "crosshair" 
               }}
-              disabled={historyIndex <= 0}
-              title="Undo (Ctrl+Z)"
-            >
-              <FaUndo />
-            </button>
-            <button 
-              onClick={handleRedo}
-              style={{
-                ...styles.smallButton,
-                opacity: historyIndex < history.length - 1 ? 1 : 0.5,
-                cursor: historyIndex < history.length - 1 ? "pointer" : "not-allowed",
-                background: 'transparent',
-                color: currentTheme.text,
-                border: `1px solid ${currentTheme.border}`
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={() => { 
+                setCursorCoords(null); 
+                setZoomState((p)=> ({...p, isDragging:false})); 
+                setCropState(prev => ({...prev, isDragging: false}));
+                if (handEraseState.isErasing) stopHandErase();
               }}
-              disabled={historyIndex >= history.length - 1}
-              title="Redo (Ctrl+Y)"
-            >
-              <FaRedoAlt />
-            </button>
+              onWheel={handleWheel}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              onTouchCancel={handleTouchEnd}
+            />
           </div>
 
-   <canvas
-  ref={canvasRef}
-  style={{ 
-    width: "100%", 
-    height: "100%", 
-    display: "block", 
-    cursor: tool === "pan" ? (zoomState.isDragging ? "grabbing" : "grab") :
-            cropState.isCropping ? "crosshair" : 
-            tool === "erase" && eraseMode === "hand" ? "crosshair" : "crosshair" 
-  }}
-  onMouseDown={handleMouseDown}
-  onMouseMove={handleMouseMove}
-  onMouseUp={handleMouseUp}
-  onMouseLeave={() => { 
-    setCursorCoords(null); 
-    setZoomState((p)=> ({...p, isDragging:false})); 
-    setCropState(prev => ({...prev, isDragging: false}));
-    if (handEraseState.isErasing) stopHandErase();
-  }}
-  onWheel={handleWheel}
-  onTouchStart={handleTouchStart}
-  onTouchMove={handleTouchMove}
-  onTouchEnd={handleTouchEnd}
-  onTouchCancel={handleTouchEnd}
-/>
+          {/* HORIZONTAL TOOLBAR */}
+          <div style={styles.toolbar}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 12 }}>
+              <FaTools style={{ color: currentTheme.accent }} />
+              <span style={{ fontWeight: '600', fontSize: '14px', color: currentTheme.text }}>Tools:</span>
+            </div>
+            
+            <button 
+              onClick={() => setTool("pan")} 
+              style={tool === "pan" ? styles.buttonSmallActive : styles.buttonSmall}
+              title="Drag to pan the map (Spacebar or Middle mouse button)"
+            >
+              <FaHandPaper />
+              Pan
+            </button>
+            
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 12 }}>
+              <FaPalette style={{ color: currentTheme.accent }} />
+              <span style={{ fontWeight: '600', fontSize: '14px', color: currentTheme.text }}>Annotate:</span>
+            </div>
+            
+            <button 
+              onClick={() => setTool("place_node")} 
+              style={tool === "place_node" ? styles.buttonSmallActive : styles.buttonSmall}
+              title="Place nodes on the map"
+            >
+              <FaMapMarkerAlt />
+              Node
+            </button>
+            
+            <div style={{ marginRight: 4 }}>
+              <select 
+                value={nodeType} 
+                onChange={(e) => setNodeType(e.target.value)} 
+                style={{
+                  ...styles.select,
+                  padding: "8px 12px",
+                  margin: 0,
+                  fontSize: '13px',
+                  height: '36px'
+                }}
+              >
+                <option value="station">🏭 Station</option>
+                <option value="docking">📍 Docking</option>
+                <option value="waypoint">🚩 Waypoint</option>
+                <option value="home">🏠 Home</option>
+                <option value="charging">🔋 Charging</option>
+              </select>
+            </div>
+            
+            <button 
+              onClick={() => setTool("connect")} 
+              style={tool === "connect" ? styles.buttonSmallActive : styles.buttonSmall}
+              title="Draw arrows between nodes"
+            >
+              <FaArrowRight />
+              Arrow
+            </button>
+            
+            <button 
+              onClick={() => {
+                setTool("zone");
+                setZoneType("normal");
+              }} 
+              style={tool === "zone" && zoneType === "normal" ? styles.buttonSmallActive : styles.buttonSmall}
+              title="Draw zones"
+            >
+              <FaDrawPolygon />
+              Zone
+            </button>
+            
+            <div style={{ marginRight: 4 }}>
+              <input 
+                value={zoneName} 
+                onChange={(e) => setZoneName(e.target.value)} 
+                placeholder="Zone name" 
+                style={{
+                  ...styles.input,
+                  padding: "8px 12px",
+                  margin: 0,
+                  fontSize: '13px',
+                  height: '36px',
+                  width: '120px'
+                }} 
+              />
+            </div>
+            
+            <button 
+              onClick={() => {
+                setTool("zone");
+                setZoneType("keep_out");
+              }} 
+              style={tool === "zone" && zoneType === "keep_out" ? {
+                ...styles.buttonSmallActive,
+                background: '#000000',
+                borderColor: '#000000'
+              } : {
+                ...styles.buttonSmall,
+                background: 'rgba(0,0,0,0.1)',
+                color: '#000000',
+                borderColor: '#666666'
+              }}
+              title="Draw restricted zones (black areas)"
+            >
+              <FaBan />
+              Restricted Zone
+            </button>
+            
+            <button 
+              onClick={finishZone}
+              style={styles.buttonSmall}
+              disabled={currentZonePoints.length < 3}
+              title="Finish drawing zone"
+            >
+              <FaCheck />
+              Finish Zone
+            </button>
+            
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: 12, marginRight: 12 }}>
+              <FaBrush style={{ color: currentTheme.accent }} />
+              <span style={{ fontWeight: '600', fontSize: '14px', color: currentTheme.text }}>Edit:</span>
+            </div>
+            
+            <button 
+              onClick={() => setTool("erase")} 
+              style={tool === "erase" ? styles.buttonSmallActive : styles.buttonSmall}
+              title="Erase objects or noise"
+            >
+              <FaEraser />
+              Erase
+            </button>
+            
+            {tool === "erase" && (
+              <>
+                <select 
+                  value={eraseMode} 
+                  onChange={(e) => setEraseMode(e.target.value)} 
+                  style={{
+                    ...styles.select,
+                    padding: "8px 12px",
+                    margin: 0,
+                    fontSize: '13px',
+                    height: '36px',
+                    width: '140px'
+                  }}
+                >
+                  <option value="objects">🗑️ Objects</option>
+                  <option value="noise">🧹 Map Noise</option>
+                  <option value="hand">✋ Hand Erase</option>
+                </select>
+                
+                {(eraseMode === "noise" || eraseMode === "hand") && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: '13px', color: currentTheme.textSecondary }}>Radius:</span>
+                    <input 
+                      type="range"
+                      min="1"
+                      max="20"
+                      value={eraseRadius}
+                      onChange={(e) => setEraseRadius(parseInt(e.target.value))}
+                      style={{ width: '80px' }}
+                    />
+                    <span style={{ fontSize: '13px', color: currentTheme.text, minWidth: '24px' }}>{eraseRadius}</span>
+                  </div>
+                )}
+              </>
+            )}
+            
+            <button 
+              onClick={startCrop} 
+              style={tool === "crop" ? styles.buttonSmallActive : styles.buttonSmall}
+              title="Crop map area"
+            >
+              <FaCropAlt />
+              Crop
+            </button>
+            
+            {cropState.isCropping && (
+              <>
+                <button
+                  onClick={handleApplyCrop}
+                  style={{
+                    ...styles.buttonSmall,
+                    background: '#10b981',
+                    borderColor: '#059669',
+                    color: 'white'
+                  }}
+                  disabled={!cropState.freehandPoints || cropState.freehandPoints.length < 3}
+                  title="Apply crop to current map"
+                >
+                  <FaCheck />
+                  Apply Crop
+                </button>
+                
+                <button 
+                  onClick={cancelCrop}
+                  style={{
+                    ...styles.buttonSmall,
+                    background: currentTheme.danger,
+                    borderColor: currentTheme.danger,
+                    color: 'white'
+                  }}
+                  title="Cancel crop"
+                >
+                  <FaTimes />
+                  Cancel
+                </button>
+              </>
+            )}
+            
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: 12, marginRight: 12 }}>
+              <FaRedo style={{ color: currentTheme.accent }} />
+              <span style={{ fontWeight: '600', fontSize: '14px', color: currentTheme.text }}>Rotation:</span>
+            </div>
+            
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input 
+                type="number"
+                min="0"
+                max="359"
+                value={rotation}
+                onChange={handleRotationInput}
+                style={{
+                  ...styles.input,
+                  padding: "8px 12px",
+                  margin: 0,
+                  fontSize: '13px',
+                  height: '36px',
+                  width: '80px',
+                  textAlign: 'center'
+                }}
+                placeholder="Degrees"
+              />
+              <span style={{ fontSize: '14px', color: currentTheme.textSecondary }}>°</span>
+              <button onClick={handleRotate} style={styles.buttonSmall}>
+                <FaRedo />
+                +90°
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   );
 }
-
-
-

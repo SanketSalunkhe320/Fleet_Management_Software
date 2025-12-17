@@ -607,22 +607,22 @@ export default function HealthCheck() {
           </div>
 
           {/* MAC Address */}
-          <div className="flex items-center justify-between">
+          {/* <div className="flex items-center justify-between">
             <span className="text-gray-600 dark:text-gray-300">MAC Address</span>
             <span className="font-mono text-sm">{details.macAddress}</span>
-          </div>
+          </div> */}
 
           {/* Connection Type */}
-          <div className="flex items-center justify-between">
+          {/* <div className="flex items-center justify-between">
             <span className="text-gray-600 dark:text-gray-300">Connection Type</span>
             <span className="font-medium">{details.connectionType}</span>
-          </div>
+          </div> */}
 
           {/* Bitrate */}
-          <div className="flex items-center justify-between">
+          {/* <div className="flex items-center justify-between">
             <span className="text-gray-600 dark:text-gray-300">Bitrate</span>
             <span className="font-medium">{details.bitrate}</span>
-          </div>
+          </div> */}
         </div>
 
         {/* Modal Footer */}
