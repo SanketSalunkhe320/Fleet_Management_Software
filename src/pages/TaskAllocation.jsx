@@ -1,388 +1,324 @@
-// import React, { useState, useEffect } from "react";
-// import { Plus, Trash2, Edit3, Save, Send, Settings } from "lucide-react";
 
-// // ✅ Full event schema definition
+
+
+// import React, { useEffect, useState } from "react";
+// import axios from "axios";
+// import { Plus, Trash2, Edit3, Send, Settings, Check, X } from "lucide-react";
+
+// const api = axios.create({
+//   baseURL: "http://localhost:3002/api",
+// });
+
+// /* ================= EVENT SCHEMA ================= */
+
 // const eventSchema = {
 //   Wait: {
 //     displayName: "Wait",
 //     attributes: {
-//       duration: { type: "number", description: "Duration in milliseconds", readOnly: false },
-//       trigger_service_name: {
-//         type: "string",
-//         description: "Name of the trigger service",
-//         default: "wait_trigger",
-//         readOnly: true,
-//       },
-//       wait_topic_info: { type: "string", description: "Info to be published on wait topic", readOnly: false },
+//       duration: { type: "number", label: "Duration (ms)", default: 1000 },
 //     },
 //   },
-//   GoToZone: {
-//     displayName: "Go to Zone",
+//   MoveForward: {
+//     displayName: "Move Forward",
 //     attributes: {
-//       zone_to_go: { type: "string", description: "Zone name", readOnly: false },
-//       direction: {
-//         type: "enum",
-//         options: ["forward", "reverse"],
-//         description: "Direction",
-//         readOnly: false,
-//       },
+//       distance: { type: "number", label: "Distance (m)", default: 1 },
+//       speed: { type: "number", label: "Speed (m/s)", default: 0.5 },
 //     },
 //   },
-//   LineFollow: {
-//     displayName: "Line Follow",
+//   MoveReverse: {
+//     displayName: "Move Reverse",
 //     attributes: {
-//       direction: {
-//         type: "enum",
-//         options: ["forward", "reverse"],
-//         description: "Direction",
-//         readOnly: false,
-//       },
-//       end_tag: { type: "number", description: "End tag number", readOnly: false },
-//       safety_tag: { type: "number", description: "Safety tag number", readOnly: false },
-//       relative_distance_to_tag: {
-//         type: "number",
-//         description: "Relative distance to tag (-1 to 1)",
-//         readOnly: false,
-//       },
+//       distance: { type: "number", label: "Distance (m)", default: 1 },
+//       speed: { type: "number", label: "Speed (m/s)", default: 0.5 },
 //     },
 //   },
-//   MoveRobot: {
-//     displayName: "Move Robot",
+//   RotateClockwise: {
+//     displayName: "Rotate Clockwise",
 //     attributes: {
-//       direction: {
-//         type: "enum",
-//         options: ["forward", "reverse"],
-//         description: "Direction",
-//         readOnly: false,
-//       },
-//       movement_distance: { type: "number", description: "Movement distance in meters", readOnly: false },
-//       movement_speed: { type: "number", description: "Movement speed in m/s", readOnly: false },
-//       cmd_vel_topic: {
-//         type: "string",
-//         description: "Command velocity topic",
-//         default: "controller_cmd_vel",
-//         readOnly: true,
-//       },
+//       angle: { type: "number", label: "Angle (deg)", default: 90 },
 //     },
 //   },
-//   RotateOnSpot: {
-//     displayName: "Rotate on Spot",
+//   RotateAntiClockwise: {
+//     displayName: "Rotate Anti-Clockwise",
 //     attributes: {
-//       rotate_angle: { type: "number", description: "Rotate angle in degrees", readOnly: false },
-//       direction: {
-//         type: "enum",
-//         options: ["clockwise", "anticlockwise"],
-//         description: "Direction",
-//         readOnly: false,
-//       },
-//       angular_speed: { type: "number", description: "Angular speed in r/s", readOnly: false },
-//     },
-//   },
-//   MoveActuator: {
-//     displayName: "Move Actuator",
-//     attributes: {
-//       actuator_type: {
-//         type: "enum",
-//         options: ["linear", "lifter"],
-//         description: "Actuator Type",
-//         readOnly: false,
-//       },
-//       actuator_number: {
-//         type: "enum",
-//         options: ["0", "1", "2", "3", "4"],
-//         description: "Actuator Number",
-//         readOnly: false,
-//       },
-//       move_time: { type: "number", description: "Move time in milliseconds", readOnly: false },
-//       move_direction: {
-//         type: "enum",
-//         options: ["up", "down"],
-//         description: "Move Direction",
-//         readOnly: false,
-//       },
-//     },
-//   },
-//   ChangeSensorProfile: {
-//     displayName: "Change Sensor Profile",
-//     attributes: { profile_name: { type: "string", description: "Sensor profile", readOnly: false } },
-//   },
-//   TriggerMoveArm: {
-//     displayName: "Trigger Move Arm",
-//     attributes: {
-//       machine_id: { type: "string", description: "Machine ID", readOnly: false },
-//       operation: { type: "string", description: "Operation", readOnly: false },
+//       angle: { type: "number", label: "Angle (deg)", default: 90 },
 //     },
 //   },
 // };
 
-// export default function TaskAllocation() {
+// /* ================= COMPONENT ================= */
+
+// export default function TaskAllocationPage() {
+//   const [robots, setRobots] = useState([]);
 //   const [missions, setMissions] = useState([]);
-//   const [selectedMission, setSelectedMission] = useState(null);
-//   const [showTaskConfig, setShowTaskConfig] = useState(null);
+//   const [selectedMissionId, setSelectedMissionId] = useState(null);
+//   const [selectedRobot, setSelectedRobot] = useState("");
+//   const [editingMissionName, setEditingMissionName] = useState(false);
+//   const [backendStatus, setBackendStatus] = useState("Disconnected");
+//   const [loading, setLoading] = useState(false);
+
+//   const selectedMission = missions.find((m) => m.id === selectedMissionId);
 //   const eventTypes = Object.keys(eventSchema);
 
-//   // ✅ Load missions from localStorage on startup
+//   /* ================= LOAD / SAVE MISSIONS ================= */
+
 //   useEffect(() => {
-//     const stored = localStorage.getItem("missions");
-//     if (stored) {
-//       try {
-//         setMissions(JSON.parse(stored));
-//       } catch {
-//         console.error("Invalid saved missions data");
-//       }
-//     }
+//     const saved = localStorage.getItem("missions");
+//     if (saved) setMissions(JSON.parse(saved));
 //   }, []);
 
-//   // ✅ Auto-save missions to localStorage on every change
 //   useEffect(() => {
 //     localStorage.setItem("missions", JSON.stringify(missions));
 //   }, [missions]);
 
+//   /* ================= FETCH ROBOTS ================= */
+
+//   useEffect(() => {
+//     const fetchRobots = async () => {
+//       try {
+//         const res = await api.get("/robots");
+//         if (res.data.success) {
+//           setRobots(res.data.robots);
+//           setBackendStatus("Connected");
+//         }
+//       } catch {
+//         setBackendStatus("Disconnected");
+//       }
+//     };
+
+//     fetchRobots();
+//     const i = setInterval(fetchRobots, 3000);
+//     return () => clearInterval(i);
+//   }, []);
+
+//   /* ================= MISSION ACTIONS ================= */
+
 //   const createMission = () => {
-//     const name = prompt("Enter Mission Name:");
+//     const name = prompt("Mission name:");
 //     if (!name) return;
-//     const newMission = { id: Date.now(), name, tasks: [] };
-//     setMissions([...missions, newMission]);
+
+//     const mission = { id: Date.now(), name, tasks: [] };
+//     setMissions((prev) => [...prev, mission]);
+//     setSelectedMissionId(mission.id);
 //   };
+
+//   const updateMissionName = (name) => {
+//     setMissions((prev) =>
+//       prev.map((m) =>
+//         m.id === selectedMissionId ? { ...m, name } : m
+//       )
+//     );
+//     setEditingMissionName(false);
+//   };
+
+//   const deleteMission = () => {
+//     if (!selectedMission) return;
+
+//     if (selectedMission.tasks.length > 0) {
+//       alert("Delete all tasks before deleting mission");
+//       return;
+//     }
+
+//     if (!window.confirm("Delete this mission?")) return;
+
+//     setMissions((prev) => prev.filter((m) => m.id !== selectedMissionId));
+//     setSelectedMissionId(null);
+//   };
+
+//   const deleteAllTasks = () => {
+//     if (!selectedMission) return;
+//     if (!window.confirm("Delete all tasks?")) return;
+
+//     setMissions((prev) =>
+//       prev.map((m) =>
+//         m.id === selectedMissionId ? { ...m, tasks: [] } : m
+//       )
+//     );
+//   };
+
+//   /* ================= TASK ACTIONS ================= */
 
 //   const addTask = (type) => {
-//     const attrs = eventSchema[type]?.attributes || {};
-//     const config = Object.fromEntries(Object.entries(attrs).map(([k, v]) => [k, v.default ?? ""]));
-//     const newTask = { id: Date.now(), type, config };
-//     const updated = { ...selectedMission, tasks: [...selectedMission.tasks, newTask] };
-//     setSelectedMission(updated);
-//     setMissions(missions.map((m) => (m.id === updated.id ? updated : m)));
+//     if (!selectedMission) return;
+
+//     const schema = eventSchema[type].attributes;
+//     const config = Object.fromEntries(
+//       Object.entries(schema).map(([k, v]) => [k, v.default])
+//     );
+
+//     const task = { id: Date.now(), type, config };
+
+//     setMissions((prev) =>
+//       prev.map((m) =>
+//         m.id === selectedMissionId
+//           ? { ...m, tasks: [...m.tasks, task] }
+//           : m
+//       )
+//     );
 //   };
 
-//   const updateTaskConfig = (taskId, field, value) => {
-//     const updatedTasks = selectedMission.tasks.map((t) =>
-//       t.id === taskId ? { ...t, config: { ...t.config, [field]: value } } : t
+//   const updateTask = (taskId, key, value) => {
+//     setMissions((prev) =>
+//       prev.map((m) =>
+//         m.id === selectedMissionId
+//           ? {
+//               ...m,
+//               tasks: m.tasks.map((t) =>
+//                 t.id === taskId
+//                   ? { ...t, config: { ...t.config, [key]: value } }
+//                   : t
+//               ),
+//             }
+//           : m
+//       )
 //     );
-//     const updatedMission = { ...selectedMission, tasks: updatedTasks };
-//     setSelectedMission(updatedMission);
-//     setMissions(missions.map((m) => (m.id === updatedMission.id ? updatedMission : m)));
 //   };
 
 //   const deleteTask = (taskId) => {
-//     const updated = { ...selectedMission, tasks: selectedMission.tasks.filter((t) => t.id !== taskId) };
-//     setSelectedMission(updated);
-//     setMissions(missions.map((m) => (m.id === updated.id ? updated : m)));
-//   };
-
-//   const renderDynamicForm = (task) => {
-//     const schema = eventSchema[task.type];
-//     if (!schema) return <p>No configuration found.</p>;
-
-//     return (
-//       <div className="grid gap-3">
-//         {Object.entries(schema.attributes).map(([key, attr]) => (
-//           <div key={key}>
-//             <label className="block text-sm font-medium mb-1">{attr.description}</label>
-//             {attr.type === "enum" ? (
-//               <select
-//                 value={task.config[key] ?? ""}
-//                 disabled={attr.readOnly}
-//                 onChange={(e) => updateTaskConfig(task.id, key, e.target.value)}
-//                 className="w-full p-2 border rounded bg-slate-50 dark:bg-slate-700"
-//               >
-//                 <option value="">Select...</option>
-//                 {attr.options?.map((opt) => (
-//                   <option key={opt} value={opt}>
-//                     {opt}
-//                   </option>
-//                 ))}
-//               </select>
-//             ) : (
-//               <input
-//                 type={attr.type === "number" ? "number" : "text"}
-//                 readOnly={attr.readOnly}
-//                 value={task.config[key] ?? ""}
-//                 onChange={(e) =>
-//                   updateTaskConfig(
-//                     task.id,
-//                     key,
-//                     attr.type === "number" ? +e.target.value : e.target.value
-//                   )
-//                 }
-//                 className={`w-full p-2 border rounded bg-slate-50 dark:bg-slate-700 ${
-//                   attr.readOnly ? "opacity-70 cursor-not-allowed" : ""
-//                 }`}
-//               />
-//             )}
-//           </div>
-//         ))}
-//       </div>
+//     setMissions((prev) =>
+//       prev.map((m) =>
+//         m.id === selectedMissionId
+//           ? { ...m, tasks: m.tasks.filter((t) => t.id !== taskId) }
+//           : m
+//       )
 //     );
 //   };
 
-//   return (
-//     <div className="p-6 bg-gray-50 dark:bg-gray-900 min-h-screen text-gray-900 dark:text-gray-100 space-y-6" style={{ userSelect: "none" }} >
-      
-//       <header className="flex justify-between items-center">
-//         <h1 className="text-xl font-semibold flex items-center gap-2 text-sky-600">
-//           <Settings size={20} /> Task Allocation (Mission Planner)
-//         </h1>
-//         <div className="flex gap-2">
-//           <button
-//             onClick={createMission}
-//             className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded"
-//           >
-//             <Plus size={16} /> Create New Mission
-//           </button>
+//   /* ================= SEND MISSION ================= */
 
-//           {/* 📂 Load Mission Button */}
-//           <button
-//             onClick={() => {
-//               const input = document.createElement("input");
-//               input.type = "file";
-//               input.accept = ".json";
-//               input.onchange = (e) => {
-//                 const file = e.target.files[0];
-//                 if (!file) return;
-//                 const reader = new FileReader();
-//                 reader.onload = (event) => {
-//                   try {
-//                     const data = JSON.parse(event.target.result);
-//                     setMissions((prev) => [...prev, data]);
-//                     alert("✅ Mission loaded successfully!");
-//                   } catch {
-//                     alert("❌ Invalid JSON file.");
-//                   }
-//                 };
-//                 reader.readAsText(file);
-//               };
-//               input.click();
-//             }}
-//             className="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded"
-//           >
-//             📂 Load Mission from your computer
-//           </button>
-//         </div>
+//   const assignMission = async () => {
+//     if (!selectedMission || !selectedRobot || selectedMission.tasks.length === 0)
+//       return alert("Select robot and add tasks");
+
+//     try {
+//       setLoading(true);
+//       await api.post("/assign-mission", {
+//         robotId: selectedRobot,
+//         mission: selectedMission,
+//       });
+//       alert("Mission sent to AMR");
+//     } catch {
+//       alert("Backend not reachable");
+//     } finally {
+//       setLoading(false);
+//     }
+//   };
+
+//   /* ================= UI ================= */
+
+//   return (
+//     <div className="p-6 space-y-6">
+//       <header className="flex justify-between">
+//         <h1 className="text-2xl font-bold flex gap-2">
+//           <Settings size={20} /> Task Allocation
+//         </h1>
+//         <span
+//           className={`px-3 py-1 rounded text-white ${
+//             backendStatus === "Connected" ? "bg-green-600" : "bg-red-600"
+//           }`}
+//         >
+//           Backend: {backendStatus}
+//         </span>
 //       </header>
 
-//       {!selectedMission && (
-//         <div className="grid gap-3">
-//           {missions.length === 0 ? (
-//             <p className="text-gray-500">No missions yet. Click “New Mission”.</p>
-//           ) : (
-//             missions.map((m) => (
-//               <div
-//                 key={m.id}
-//                 className="p-3 border rounded-lg flex justify-between items-center hover:bg-slate-50 dark:hover:bg-slate-800"
-//               >
-//                 <span>{m.name}</span>
-//                 <button
-//                   onClick={() => setSelectedMission(m)}
-//                   className="bg-sky-600 hover:bg-sky-700 text-white px-3 py-1 rounded"
-//                 >
-//                   Edit
-//                 </button>
-//               </div>
-//             ))
-//           )}
-//         </div>
-//       )}
+//       {/* ROBOT SELECT */}
+//       <select
+//         value={selectedRobot}
+//         onChange={(e) => setSelectedRobot(e.target.value)}
+//         className="border p-2 rounded"
+//       >
+//         <option value="">Select Robot</option>
+//         {robots.map((r) => (
+//           <option key={r.id} value={r.id}>
+//             {r.id}
+//           </option>
+//         ))}
+//       </select>
 
+//       {/* MISSIONS */}
+//       <button onClick={createMission} className="bg-blue-600 text-white px-4 py-2 rounded flex gap-2">
+//         <Plus size={16} /> New Mission
+//       </button>
+
+//       {missions.map((m) => (
+//         <div
+//           key={m.id}
+//           onClick={() => setSelectedMissionId(m.id)}
+//           className={`p-2 border rounded cursor-pointer ${
+//             m.id === selectedMissionId ? "bg-blue-50 border-blue-500" : ""
+//           }`}
+//         >
+//           {m.name} ({m.tasks.length})
+//         </div>
+//       ))}
+
+//       {/* EDITOR */}
 //       {selectedMission && (
-//         <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow space-y-4">
-//           <div className="flex justify-between items-center">
-//             <h2 className="font-semibold text-sky-700">{selectedMission.name}</h2>
-//             <button onClick={() => setSelectedMission(null)} className="text-red-600 hover:text-red-700">
-//               Back
-//             </button>
+//         <div className="border p-4 rounded space-y-4">
+//           {/* Mission name edit */}
+//           <div className="flex items-center gap-2">
+//             {editingMissionName ? (
+//               <>
+//                 <input
+//                   defaultValue={selectedMission.name}
+//                   onBlur={(e) => updateMissionName(e.target.value)}
+//                   className="border p-1 rounded"
+//                 />
+//                 <Check size={18} />
+//               </>
+//             ) : (
+//               <>
+//                 <h2 className="font-bold text-lg">{selectedMission.name}</h2>
+//                 <Edit3 size={18} onClick={() => setEditingMissionName(true)} />
+//               </>
+//             )}
+//             <Trash2
+//               className="text-red-600 cursor-pointer ml-auto"
+//               onClick={deleteMission}
+//             />
 //           </div>
 
-//           <div className="flex flex-wrap gap-2">
+//           {/* TASK BUTTONS */}
+//           <div className="flex gap-2 flex-wrap">
 //             {eventTypes.map((t) => (
-//               <button
-//                 key={t}
-//                 onClick={() => addTask(t)}
-//                 className="px-3 py-2 rounded border text-sm bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600"
-//               >
+//               <button key={t} onClick={() => addTask(t)} className="border px-3 py-1 rounded">
 //                 + {eventSchema[t].displayName}
 //               </button>
 //             ))}
+//             <button onClick={deleteAllTasks} className="text-red-600 border px-3 py-1 rounded">
+//               Delete All Tasks
+//             </button>
 //           </div>
 
-//           <div className="space-y-2 mt-4">
-//             {selectedMission.tasks.length === 0 ? (
-//               <p className="text-gray-500 text-sm">No tasks added yet.</p>
-//             ) : (
-//               selectedMission.tasks.map((task) => (
-//                 <div
-//                   key={task.id}
-//                   className={`p-3 border rounded-lg ${
-//                     showTaskConfig === task.id ? "border-sky-500 bg-sky-50 dark:bg-sky-900" : ""
-//                   }`}
-//                 >
-//                   <div className="flex justify-between items-center">
-//                     <span className="font-medium">
-//                       {eventSchema[task.type]?.displayName || task.type}
-//                     </span>
-//                     <div className="flex gap-2">
-//                       <button
-//                         onClick={() =>
-//                           setShowTaskConfig(showTaskConfig === task.id ? null : task.id)
-//                         }
-//                         className="text-sky-600 hover:text-sky-700"
-//                       >
-//                         <Edit3 size={16} />
-//                       </button>
-//                       <button
-//                         onClick={() => deleteTask(task.id)}
-//                         className="text-red-600 hover:text-red-700"
-//                       >
-//                         <Trash2 size={16} />
-//                       </button>
-//                     </div>
-//                   </div>
+//           {/* TASKS */}
+//           {selectedMission.tasks.map((task) => (
+//             <div key={task.id} className="border p-2 rounded">
+//               <div className="flex justify-between">
+//                 <strong>{eventSchema[task.type].displayName}</strong>
+//                 <Trash2 className="text-red-600 cursor-pointer" onClick={() => deleteTask(task.id)} />
+//               </div>
 
-//                   {showTaskConfig === task.id && (
-//                     <div className="mt-3">{renderDynamicForm(task)}</div>
-//                   )}
+//               {Object.entries(eventSchema[task.type].attributes).map(([k, v]) => (
+//                 <div key={k} className="flex gap-2 mt-1">
+//                   <label className="w-32">{v.label}</label>
+//                   <input
+//                     type="number"
+//                     value={task.config[k]}
+//                     onChange={(e) => updateTask(task.id, k, +e.target.value)}
+//                     className="border p-1 rounded w-32"
+//                   />
 //                 </div>
-//               ))
-//             )}
-//           </div>
+//               ))}
+//             </div>
+//           ))}
 
-//           <div className="flex gap-3 pt-4">
-//             {/* 💾 Save */}
-//             <button
-//               onClick={() => {
-//                 if (!selectedMission) return;
-//                 const jsonData = JSON.stringify(selectedMission, null, 2);
-//                 const blob = new Blob([jsonData], { type: "application/json" });
-//                 const link = document.createElement("a");
-//                 link.href = URL.createObjectURL(blob);
-//                 link.download = `${selectedMission.name.replace(/\s+/g, "_")}_mission.json`;
-//                 link.click();
-//               }}
-//               className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded"
-//             >
-//               <Save size={16} /> Save Mission
-//             </button>
-
-//             {/* 🚀 Send */}
-//             <button
-//               onClick={() => alert(`🚀 Mission "${selectedMission.name}" sent to AMR successfully!`)}
-//               className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
-//             >
-//               <Send size={16} /> Send to AMR
-//             </button>
-
-//             {/* 🗑️ Delete */}
-//             <button
-//               onClick={() => {
-//                 if (window.confirm(`Delete mission "${selectedMission.name}"?`)) {
-//                   setMissions((prev) => prev.filter((m) => m.id !== selectedMission.id));
-//                   setSelectedMission(null);
-//                 }
-//               }}
-//               className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded"
-//             >
-//               <Trash2 size={16} /> Delete
-//             </button>
-//           </div>
+//           <button
+//             onClick={assignMission}
+//             disabled={loading}
+//             className="bg-purple-600 text-white px-4 py-2 rounded flex gap-2"
+//           >
+//             <Send size={16} /> Send to AMR
+//           </button>
 //         </div>
 //       )}
 //     </div>
@@ -390,104 +326,207 @@
 // }
 
 
+
 import React, { useEffect, useState } from "react";
 import axios from "axios";
-import { Plus, Trash2, Send } from "lucide-react";
+import { Plus, Trash2, Edit3, Send, Settings, Check } from "lucide-react";
 
 const api = axios.create({
   baseURL: "http://localhost:3002/api",
 });
 
-// Define task schema
-const taskSchema = {
-  MoveForward: { label: "Move Forward", config: { speed: 0.5, distance: 1 } },
-  MoveReverse: { label: "Move Reverse", config: { speed: 0.5, distance: 1 } },
-  RotateClockwise: { label: "Rotate Clockwise", config: { angle: 90 } },
-  RotateAntiClockwise: { label: "Rotate Anti-Clockwise", config: { angle: 90 } },
-  Wait: { label: "Wait", config: { duration: 1000 } },
+/* ================= EVENT SCHEMA ================= */
+
+const eventSchema = {
+  Wait: {
+    displayName: "Wait",
+    attributes: {
+      duration: { type: "number", label: "Duration (ms)", default: 1000 },
+    },
+  },
+  MoveForward: {
+    displayName: "Move Forward",
+    attributes: {
+      distance: { type: "number", label: "Distance (m)", default: 1 },
+      speed: { type: "number", label: "Speed (m/s)", default: 0.5 },
+    },
+  },
+  MoveReverse: {
+    displayName: "Move Reverse",
+    attributes: {
+      distance: { type: "number", label: "Distance (m)", default: 1 },
+      speed: { type: "number", label: "Speed (m/s)", default: 0.5 },
+    },
+  },
+  RotateClockwise: {
+    displayName: "Rotate Clockwise",
+    attributes: {
+      angle: { type: "number", label: "Angle (deg)", default: 90 },
+    },
+  },
+  RotateAntiClockwise: {
+    displayName: "Rotate Anti-Clockwise",
+    attributes: {
+      angle: { type: "number", label: "Angle (deg)", default: 90 },
+    },
+  },
 };
+
+/* ================= COMPONENT ================= */
 
 export default function TaskAllocationPage() {
   const [robots, setRobots] = useState([]);
-  const [selectedRobot, setSelectedRobot] = useState("");
   const [missions, setMissions] = useState([]);
-  const [selectedMission, setSelectedMission] = useState(null);
+  const [selectedMissionId, setSelectedMissionId] = useState(null);
+  const [selectedRobot, setSelectedRobot] = useState("");
+  const [editingMissionName, setEditingMissionName] = useState(false);
   const [backendStatus, setBackendStatus] = useState("Disconnected");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
 
-  // Fetch robots
-  const fetchRobots = async () => {
-    try {
-      const res = await api.get("/robots");
-      if (res.data.success) {
-        setRobots(res.data.robots);
-        setBackendStatus("Connected");
-      } else setBackendStatus("Disconnected");
-    } catch {
-      setBackendStatus("Disconnected");
-    }
-  };
+  // ✅ NEW
+  const [loopMission, setLoopMission] = useState(false);
+
+  const selectedMission = missions.find((m) => m.id === selectedMissionId);
+  const eventTypes = Object.keys(eventSchema);
+
+  /* ================= LOAD / SAVE MISSIONS ================= */
 
   useEffect(() => {
-    fetchRobots();
-    const interval = setInterval(fetchRobots, 3000);
-    return () => clearInterval(interval);
+    const saved = localStorage.getItem("missions");
+    if (saved) setMissions(JSON.parse(saved));
   }, []);
 
-  // Create a new mission
-  const createMission = () => {
-    const name = prompt("Enter mission name:");
-    if (!name) return;
-    const mission = { id: Date.now(), name, tasks: [] };
-    setMissions([...missions, mission]);
-    setSelectedMission(mission);
-  };
+  useEffect(() => {
+    localStorage.setItem("missions", JSON.stringify(missions));
+  }, [missions]);
 
-  // Add a task
-  const addTask = (type) => {
-    if (!selectedMission) return alert("Select a mission first");
-    const task = {
-      id: Date.now(),
-      type,
-      config: { ...taskSchema[type].config },
+  /* ================= FETCH ROBOTS ================= */
+
+  useEffect(() => {
+    const fetchRobots = async () => {
+      try {
+        const res = await api.get("/robots");
+        if (res.data.success) {
+          setRobots(res.data.robots);
+          setBackendStatus("Connected");
+        }
+      } catch {
+        setBackendStatus("Disconnected");
+      }
     };
-    const updated = { ...selectedMission, tasks: [...selectedMission.tasks, task] };
-    setSelectedMission(updated);
-    setMissions(missions.map(m => m.id === updated.id ? updated : m));
+
+    fetchRobots();
+    const i = setInterval(fetchRobots, 3000);
+    return () => clearInterval(i);
+  }, []);
+
+  /* ================= MISSION ACTIONS ================= */
+
+  const createMission = () => {
+    const name = prompt("Mission name:");
+    if (!name) return;
+
+    const mission = { id: Date.now(), name, tasks: [] };
+    setMissions((prev) => [...prev, mission]);
+    setSelectedMissionId(mission.id);
   };
 
-  // Update task config
-  const updateTaskConfig = (taskId, field, value) => {
-    const updatedTasks = selectedMission.tasks.map(task =>
-      task.id === taskId ? { ...task, config: { ...task.config, [field]: value } } : task
+  const updateMissionName = (name) => {
+    setMissions((prev) =>
+      prev.map((m) =>
+        m.id === selectedMissionId ? { ...m, name } : m
+      )
     );
-    const updatedMission = { ...selectedMission, tasks: updatedTasks };
-    setSelectedMission(updatedMission);
-    setMissions(missions.map(m => m.id === updatedMission.id ? updatedMission : m));
+    setEditingMissionName(false);
   };
 
-  // Delete task
+  const deleteMission = () => {
+    if (!selectedMission) return;
+
+    if (selectedMission.tasks.length > 0) {
+      alert("Delete all tasks before deleting mission");
+      return;
+    }
+
+    if (!window.confirm("Delete this mission?")) return;
+
+    setMissions((prev) => prev.filter((m) => m.id !== selectedMissionId));
+    setSelectedMissionId(null);
+  };
+
+  const deleteAllTasks = () => {
+    if (!selectedMission) return;
+    if (!window.confirm("Delete all tasks?")) return;
+
+    setMissions((prev) =>
+      prev.map((m) =>
+        m.id === selectedMissionId ? { ...m, tasks: [] } : m
+      )
+    );
+  };
+
+  /* ================= TASK ACTIONS ================= */
+
+  const addTask = (type) => {
+    if (!selectedMission) return;
+
+    const schema = eventSchema[type].attributes;
+    const config = Object.fromEntries(
+      Object.entries(schema).map(([k, v]) => [k, v.default])
+    );
+
+    const task = { id: Date.now(), type, config };
+
+    setMissions((prev) =>
+      prev.map((m) =>
+        m.id === selectedMissionId
+          ? { ...m, tasks: [...m.tasks, task] }
+          : m
+      )
+    );
+  };
+
+  const updateTask = (taskId, key, value) => {
+    setMissions((prev) =>
+      prev.map((m) =>
+        m.id === selectedMissionId
+          ? {
+              ...m,
+              tasks: m.tasks.map((t) =>
+                t.id === taskId
+                  ? { ...t, config: { ...t.config, [key]: value } }
+                  : t
+              ),
+            }
+          : m
+      )
+    );
+  };
+
   const deleteTask = (taskId) => {
-    const updatedTasks = selectedMission.tasks.filter(t => t.id !== taskId);
-    const updatedMission = { ...selectedMission, tasks: updatedTasks };
-    setSelectedMission(updatedMission);
-    setMissions(missions.map(m => m.id === updatedMission.id ? updatedMission : m));
+    setMissions((prev) =>
+      prev.map((m) =>
+        m.id === selectedMissionId
+          ? { ...m, tasks: m.tasks.filter((t) => t.id !== taskId) }
+          : m
+      )
+    );
   };
 
-  // Assign mission to robot
+  /* ================= SEND MISSION ================= */
+
   const assignMission = async () => {
-    if (!selectedRobot || !selectedMission || selectedMission.tasks.length === 0)
-      return alert("Select a robot and add tasks to the mission");
+    if (!selectedMission || !selectedRobot || selectedMission.tasks.length === 0)
+      return alert("Select robot and add tasks");
 
     try {
       setLoading(true);
-      const res = await api.post("/assign-mission", {
+      await api.post("/assign-mission", {
         robotId: selectedRobot,
         mission: selectedMission,
+        loop: loopMission, // ✅ NEW
       });
-      if (res.data.success) alert("Mission assigned successfully!");
-      else alert(res.data.error || "Failed to assign mission");
+      alert(loopMission ? "Loop mission sent to AMR" : "Mission sent to AMR");
     } catch {
       alert("Backend not reachable");
     } finally {
@@ -495,102 +534,150 @@ export default function TaskAllocationPage() {
     }
   };
 
+  /* ================= UI ================= */
+
   return (
     <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Task Allocation</h1>
+      <header className="flex justify-between">
+        <h1 className="text-2xl font-bold flex gap-2">
+          <Settings size={20} /> Task Allocation
+        </h1>
         <span
-          className={`px-3 py-1 rounded-full text-sm ${
-            backendStatus === "Connected"
-              ? "bg-green-600 text-white"
-              : "bg-red-600 text-white"
+          className={`px-3 py-1 rounded text-white ${
+            backendStatus === "Connected" ? "bg-green-600" : "bg-red-600"
           }`}
         >
           Backend: {backendStatus}
         </span>
-      </div>
+      </header>
 
-      {/* Robot Selection */}
-      <div className="space-y-2">
-        <label>Select Robot:</label>
-        <select
-          value={selectedRobot}
-          onChange={(e) => setSelectedRobot(e.target.value)}
-          className="p-2 border rounded"
-        >
-          <option value="">-- Select Robot --</option>
-          {robots.map(r => (
-            <option key={r.id} value={r.id}>{r.id} ({r.status})</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Missions */}
-      <div className="space-y-2">
-        <button onClick={createMission} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded">
-          <Plus size={16} /> New Mission
-        </button>
-
-        {missions.map(m => (
-          <div
-            key={m.id}
-            onClick={() => setSelectedMission(m)}
-            className={`p-2 border rounded cursor-pointer ${selectedMission?.id === m.id ? 'border-blue-500 bg-blue-50' : 'border-gray-300'}`}
-          >
-            {m.name} ({m.tasks.length} tasks)
-          </div>
+      {/* ROBOT SELECT */}
+      <select
+        value={selectedRobot}
+        onChange={(e) => setSelectedRobot(e.target.value)}
+        className="border p-2 rounded"
+      >
+        <option value="">Select Robot</option>
+        {robots.map((r) => (
+          <option key={r.id} value={r.id}>
+            {r.id}
+          </option>
         ))}
-      </div>
+      </select>
 
-      {/* Task Editor */}
+      {/* MISSIONS */}
+      <button
+        onClick={createMission}
+        className="bg-blue-600 text-white px-4 py-2 rounded flex gap-2"
+      >
+        <Plus size={16} /> New Mission
+      </button>
+
+      {missions.map((m) => (
+        <div
+          key={m.id}
+          onClick={() => setSelectedMissionId(m.id)}
+          className={`p-2 border rounded cursor-pointer ${
+            m.id === selectedMissionId ? "bg-blue-50 border-blue-500" : ""
+          }`}
+        >
+          {m.name} ({m.tasks.length})
+        </div>
+      ))}
+
+      {/* EDITOR */}
       {selectedMission && (
-        <div className="p-4 border rounded space-y-4">
-          <h2 className="font-bold">{selectedMission.name} - Tasks</h2>
+        <div className="border p-4 rounded space-y-4">
+          {/* Mission name */}
+          <div className="flex items-center gap-2">
+            {editingMissionName ? (
+              <>
+                <input
+                  defaultValue={selectedMission.name}
+                  onBlur={(e) => updateMissionName(e.target.value)}
+                  className="border p-1 rounded"
+                />
+                <Check size={18} />
+              </>
+            ) : (
+              <>
+                <h2 className="font-bold text-lg">{selectedMission.name}</h2>
+                <Edit3 size={18} onClick={() => setEditingMissionName(true)} />
+              </>
+            )}
+            <Trash2
+              className="text-red-600 cursor-pointer ml-auto"
+              onClick={deleteMission}
+            />
+          </div>
 
-          {/* Add Task Buttons */}
-          <div className="flex flex-wrap gap-2">
-            {Object.keys(taskSchema).map(type => (
-              <button key={type} onClick={() => addTask(type)} className="px-3 py-1 border rounded hover:bg-gray-100">
-                + {taskSchema[type].label}
+          {/* TASK BUTTONS */}
+          <div className="flex gap-2 flex-wrap">
+            {eventTypes.map((t) => (
+              <button
+                key={t}
+                onClick={() => addTask(t)}
+                className="border px-3 py-1 rounded"
+              >
+                + {eventSchema[t].displayName}
               </button>
             ))}
+            <button
+              onClick={deleteAllTasks}
+              className="text-red-600 border px-3 py-1 rounded"
+            >
+              Delete All Tasks
+            </button>
           </div>
 
-          {/* Task List */}
-          {selectedMission.tasks.map((task, idx) => (
-            <div key={task.id} className="p-2 border rounded space-y-1">
-              <div className="flex justify-between items-center">
-                <strong>{idx + 1}. {taskSchema[task.type]?.label || task.type}</strong>
-                <button onClick={() => deleteTask(task.id)} className="text-red-500">
-                  <Trash2 size={16} />
-                </button>
+          {/* TASKS */}
+          {selectedMission.tasks.map((task) => (
+            <div key={task.id} className="border p-2 rounded">
+              <div className="flex justify-between">
+                <strong>{eventSchema[task.type].displayName}</strong>
+                <Trash2
+                  className="text-red-600 cursor-pointer"
+                  onClick={() => deleteTask(task.id)}
+                />
               </div>
 
-              {/* Task Config */}
-              <div className="space-y-1">
-                {Object.entries(task.config).map(([key, value]) => (
-                  <div key={key} className="flex items-center gap-2">
-                    <label className="w-24">{key}:</label>
+              {Object.entries(eventSchema[task.type].attributes).map(
+                ([k, v]) => (
+                  <div key={k} className="flex gap-2 mt-1">
+                    <label className="w-32">{v.label}</label>
                     <input
                       type="number"
-                      value={value}
-                      onChange={e => updateTaskConfig(task.id, key, parseFloat(e.target.value))}
-                      className="p-1 border rounded w-24"
+                      value={task.config[k]}
+                      onChange={(e) =>
+                        updateTask(task.id, k, +e.target.value)
+                      }
+                      className="border p-1 rounded w-32"
                     />
                   </div>
-                ))}
-              </div>
+                )
+              )}
             </div>
           ))}
 
-          {/* Assign Mission Button */}
+          {/* LOOP TOGGLE */}
+          <button
+            onClick={() => setLoopMission((prev) => !prev)}
+            className={`px-4 py-2 rounded border ${
+              loopMission
+                ? "bg-green-600 text-white"
+                : "bg-gray-200 text-black"
+            }`}
+          >
+            🔁 Loop Mission: {loopMission ? "ON" : "OFF"}
+          </button>
+
+          {/* SEND */}
           <button
             onClick={assignMission}
-            disabled={loading || selectedMission.tasks.length === 0}
-            className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded mt-2"
+            disabled={loading}
+            className="bg-purple-600 text-white px-4 py-2 rounded flex gap-2"
           >
-            <Send size={16} /> Assign Mission
+            <Send size={16} /> Send to AMR
           </button>
         </div>
       )}
