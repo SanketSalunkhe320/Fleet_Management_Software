@@ -327,6 +327,7 @@
 
 
 
+
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { Plus, Trash2, Edit3, Send, Settings, Check } from "lucide-react";
@@ -383,13 +384,10 @@ export default function TaskAllocationPage() {
   const [backendStatus, setBackendStatus] = useState("Disconnected");
   const [loading, setLoading] = useState(false);
 
-  // ✅ NEW
-  const [loopMission, setLoopMission] = useState(false);
-
   const selectedMission = missions.find((m) => m.id === selectedMissionId);
   const eventTypes = Object.keys(eventSchema);
 
-  /* ================= LOAD / SAVE MISSIONS ================= */
+  /* ================= LOAD / SAVE ================= */
 
   useEffect(() => {
     const saved = localStorage.getItem("missions");
@@ -400,72 +398,65 @@ export default function TaskAllocationPage() {
     localStorage.setItem("missions", JSON.stringify(missions));
   }, [missions]);
 
-  /* ================= FETCH ROBOTS ================= */
+  /* ================= ROBOTS ================= */
 
-  useEffect(() => {
-    const fetchRobots = async () => {
-      try {
-        const res = await api.get("/robots");
-        if (res.data.success) {
-          setRobots(res.data.robots);
-          setBackendStatus("Connected");
-        }
-      } catch {
-        setBackendStatus("Disconnected");
+ useEffect(() => {
+  const fetchRobots = async () => {
+    try {
+      const res = await api.get("/robots");
+      if (res.data.success) {
+        setRobots(res.data.robots);
+        setBackendStatus("Connected");
       }
-    };
+    } catch {
+      setBackendStatus("Disconnected");
+    }
+  };
 
-    fetchRobots();
-    const i = setInterval(fetchRobots, 3000);
-    return () => clearInterval(i);
-  }, []);
+  fetchRobots();
+  const i = setInterval(fetchRobots, 3000);
+  return () => clearInterval(i);
+}, []);
 
-  /* ================= MISSION ACTIONS ================= */
+
+  /* ================= MISSIONS ================= */
 
   const createMission = () => {
     const name = prompt("Mission name:");
     if (!name) return;
 
-    const mission = { id: Date.now(), name, tasks: [] };
+    const mission = {
+      id: Date.now(),
+      name,
+      loop: 1,          // 🔁 default: run once
+      tasks: [],
+    };
+
     setMissions((prev) => [...prev, mission]);
     setSelectedMissionId(mission.id);
   };
 
-  const updateMissionName = (name) => {
+  const updateMission = (patch) => {
     setMissions((prev) =>
       prev.map((m) =>
-        m.id === selectedMissionId ? { ...m, name } : m
+        m.id === selectedMissionId ? { ...m, ...patch } : m
       )
     );
-    setEditingMissionName(false);
   };
 
   const deleteMission = () => {
     if (!selectedMission) return;
-
     if (selectedMission.tasks.length > 0) {
-      alert("Delete all tasks before deleting mission");
+      alert("Delete all tasks first");
       return;
     }
-
-    if (!window.confirm("Delete this mission?")) return;
+    if (!window.confirm("Delete mission?")) return;
 
     setMissions((prev) => prev.filter((m) => m.id !== selectedMissionId));
     setSelectedMissionId(null);
   };
 
-  const deleteAllTasks = () => {
-    if (!selectedMission) return;
-    if (!window.confirm("Delete all tasks?")) return;
-
-    setMissions((prev) =>
-      prev.map((m) =>
-        m.id === selectedMissionId ? { ...m, tasks: [] } : m
-      )
-    );
-  };
-
-  /* ================= TASK ACTIONS ================= */
+  /* ================= TASKS ================= */
 
   const addTask = (type) => {
     if (!selectedMission) return;
@@ -477,43 +468,26 @@ export default function TaskAllocationPage() {
 
     const task = { id: Date.now(), type, config };
 
-    setMissions((prev) =>
-      prev.map((m) =>
-        m.id === selectedMissionId
-          ? { ...m, tasks: [...m.tasks, task] }
-          : m
-      )
-    );
+    updateMission({ tasks: [...selectedMission.tasks, task] });
   };
 
   const updateTask = (taskId, key, value) => {
-    setMissions((prev) =>
-      prev.map((m) =>
-        m.id === selectedMissionId
-          ? {
-              ...m,
-              tasks: m.tasks.map((t) =>
-                t.id === taskId
-                  ? { ...t, config: { ...t.config, [key]: value } }
-                  : t
-              ),
-            }
-          : m
-      )
-    );
+    updateMission({
+      tasks: selectedMission.tasks.map((t) =>
+        t.id === taskId
+          ? { ...t, config: { ...t.config, [key]: value } }
+          : t
+      ),
+    });
   };
 
   const deleteTask = (taskId) => {
-    setMissions((prev) =>
-      prev.map((m) =>
-        m.id === selectedMissionId
-          ? { ...m, tasks: m.tasks.filter((t) => t.id !== taskId) }
-          : m
-      )
-    );
+    updateMission({
+      tasks: selectedMission.tasks.filter((t) => t.id !== taskId),
+    });
   };
 
-  /* ================= SEND MISSION ================= */
+  /* ================= SEND ================= */
 
   const assignMission = async () => {
     if (!selectedMission || !selectedRobot || selectedMission.tasks.length === 0)
@@ -523,10 +497,9 @@ export default function TaskAllocationPage() {
       setLoading(true);
       await api.post("/assign-mission", {
         robotId: selectedRobot,
-        mission: selectedMission,
-        loop: loopMission, // ✅ NEW
+        mission: selectedMission, // 👈 includes loop
       });
-      alert(loopMission ? "Loop mission sent to AMR" : "Mission sent to AMR");
+      alert("Mission sent");
     } catch {
       alert("Backend not reachable");
     } finally {
@@ -551,7 +524,7 @@ export default function TaskAllocationPage() {
         </span>
       </header>
 
-      {/* ROBOT SELECT */}
+      {/* ROBOT */}
       <select
         value={selectedRobot}
         onChange={(e) => setSelectedRobot(e.target.value)}
@@ -565,7 +538,7 @@ export default function TaskAllocationPage() {
         ))}
       </select>
 
-      {/* MISSIONS */}
+      {/* NEW MISSION */}
       <button
         onClick={createMission}
         className="bg-blue-600 text-white px-4 py-2 rounded flex gap-2"
@@ -573,6 +546,7 @@ export default function TaskAllocationPage() {
         <Plus size={16} /> New Mission
       </button>
 
+      {/* MISSIONS LIST */}
       {missions.map((m) => (
         <div
           key={m.id}
@@ -581,27 +555,31 @@ export default function TaskAllocationPage() {
             m.id === selectedMissionId ? "bg-blue-50 border-blue-500" : ""
           }`}
         >
-          {m.name} ({m.tasks.length})
+          {m.name} (tasks: {m.tasks.length}, loop: {m.loop})
         </div>
       ))}
 
       {/* EDITOR */}
       {selectedMission && (
         <div className="border p-4 rounded space-y-4">
-          {/* Mission name */}
+          {/* NAME */}
           <div className="flex items-center gap-2">
             {editingMissionName ? (
               <>
                 <input
                   defaultValue={selectedMission.name}
-                  onBlur={(e) => updateMissionName(e.target.value)}
+                  onBlur={(e) =>
+                    updateMission({ name: e.target.value })
+                  }
                   className="border p-1 rounded"
                 />
                 <Check size={18} />
               </>
             ) : (
               <>
-                <h2 className="font-bold text-lg">{selectedMission.name}</h2>
+                <h2 className="font-bold text-lg">
+                  {selectedMission.name}
+                </h2>
                 <Edit3 size={18} onClick={() => setEditingMissionName(true)} />
               </>
             )}
@@ -609,6 +587,22 @@ export default function TaskAllocationPage() {
               className="text-red-600 cursor-pointer ml-auto"
               onClick={deleteMission}
             />
+          </div>
+
+          {/* LOOP */}
+          <div className="flex gap-2 items-center">
+            <label className="w-32 font-semibold">Mission Loop</label>
+            <input
+              type="number"
+              value={selectedMission.loop}
+              onChange={(e) =>
+                updateMission({ loop: Number(e.target.value) })
+              }
+              className="border p-1 rounded w-32"
+            />
+            <span className="text-sm text-gray-500">
+              (-1 = infinite)
+            </span>
           </div>
 
           {/* TASK BUTTONS */}
@@ -622,12 +616,6 @@ export default function TaskAllocationPage() {
                 + {eventSchema[t].displayName}
               </button>
             ))}
-            <button
-              onClick={deleteAllTasks}
-              className="text-red-600 border px-3 py-1 rounded"
-            >
-              Delete All Tasks
-            </button>
           </div>
 
           {/* TASKS */}
@@ -659,19 +647,6 @@ export default function TaskAllocationPage() {
             </div>
           ))}
 
-          {/* LOOP TOGGLE */}
-          <button
-            onClick={() => setLoopMission((prev) => !prev)}
-            className={`px-4 py-2 rounded border ${
-              loopMission
-                ? "bg-green-600 text-white"
-                : "bg-gray-200 text-black"
-            }`}
-          >
-            🔁 Loop Mission: {loopMission ? "ON" : "OFF"}
-          </button>
-
-          {/* SEND */}
           <button
             onClick={assignMission}
             disabled={loading}
@@ -684,3 +659,6 @@ export default function TaskAllocationPage() {
     </div>
   );
 }
+
+
+
