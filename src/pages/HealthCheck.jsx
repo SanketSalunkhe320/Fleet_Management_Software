@@ -397,7 +397,7 @@ export default function HealthCheck() {
       icon: <FaCamera className="text-xl text-purple-500" /> 
     },
     { 
-      name: "Battery", 
+      name: t("health.battery"), 
       value: batteryStatus, 
       icon: <FaBatteryFull className="text-xl text-red-500" /> 
     },
@@ -406,36 +406,36 @@ export default function HealthCheck() {
   // Section 2: Hardware Health
   const hardwareMetrics = [
     { 
-      name: "Motor Controller", 
+      name: t("health.motor"), 
       value: motorStatus, 
       icon: <FaCogs className="text-xl text-indigo-500" /> 
     },
     { 
-      name: "Encoder", 
+      name: t("health.encoder"), 
       value: hardwareStatus.encoder, 
       icon: <FaChartLine className="text-xl text-blue-500" /> 
     },
     { 
-      name: "Brakes", 
+      name: t("health.brakes"), 
       value: hardwareStatus.brakes, 
       icon: <FaCogs className="text-xl text-red-500" /> 
     },
     { 
-      name: "CPU Usage", 
+      name: t("health.cpu"), 
       value: `${hardwareStatus.cpuUsage}%`, 
       icon: <FaMicrochip className="text-xl text-green-500" />,
       isProgress: true,
       percentage: hardwareStatus.cpuUsage
     },
     { 
-      name: "Memory Usage", 
+      name: t("health.memory"), 
       value: `${hardwareStatus.memoryUsage}%`, 
       icon: <FaMemory className="text-xl text-yellow-500" />,
       isProgress: true,
       percentage: hardwareStatus.memoryUsage
     },
     { 
-      name: "Disk Usage", 
+      name: t("health.disk"), 
       value: `${hardwareStatus.diskUsage}%`, 
       icon: <FaHdd className="text-xl text-purple-500" />,
       isProgress: true,
@@ -446,32 +446,32 @@ export default function HealthCheck() {
   // Section 3: Software/ROS2
   const softwareMetrics = [
     { 
-      name: "ROS2 Nodes", 
+      name: t("health.ros2"), 
       value: ros2Status.nodes.toString(), 
       icon: <FaNetworkWired className="text-xl text-blue-500" /> 
     },
     { 
-      name: "ROS2 Topics", 
+      name: t("health.ros2t"), 
       value: ros2Status.topics.toString(), 
       icon: <FaNetworkWired className="text-xl text-green-500" /> 
     },
     { 
-      name: "Nav2 Stack", 
+      name: t("health.nav2"), 
       value: ros2Status.nav2Stack, 
       icon: <FaMapSigns className="text-xl text-purple-500" /> 
     },
     { 
-      name: "Localization", 
+      name: t("health.localization"), 
       value: ros2Status.localization, 
       icon: <FaMapMarkerAlt className="text-xl text-red-500" /> 
     },
     { 
-      name: "Path Planner", 
+      name: t("health.pathplanner"), 
       value: ros2Status.pathPlanner, 
       icon: <FaRoute className="text-xl text-indigo-500" /> 
     },
     { 
-      name: "ROS Master", 
+      name: t("health.rosmaster"), 
       value: "OK", 
       icon: <FaBrain className="text-xl text-orange-500" /> 
     },
@@ -480,7 +480,7 @@ export default function HealthCheck() {
   // Section 4: Communication
   const communicationMetrics = [
     { 
-      name: "WiFi Connection", 
+      name: t("health.wifi"), 
       value: getWifiStatus(),
       status: wifiDetails.connected ? "Connected" : "Disconnected",
       icon: <FaWifi className="text-xl text-blue-500" />,
@@ -488,17 +488,17 @@ export default function HealthCheck() {
       onClick: () => setShowWifiModal(true)
     },
     { 
-      name: "Ethernet", 
+      name: t("health.ethernet"), 
       value: "OK", 
       icon: <FaPlug className="text-xl text-green-500" /> 
     },
     { 
-      name: "Serial Communication", 
+      name: t("health.serial"), 
       value: "OK", 
       icon: <FaNetworkWired className="text-xl text-purple-500" /> 
     },
     { 
-      name: "CAN Communication", 
+      name: t("health.can"), 
       value: "OK", 
       icon: <FaBolt className="text-xl text-orange-500" /> 
     },

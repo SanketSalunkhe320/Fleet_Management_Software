@@ -444,181 +444,179 @@
 
 
 
-const express = require('express');
-const cors = require('cors');
-const http = require('http');
-const WebSocket = require('ws');
+const express = require("express");
+const cors = require("cors");
+const http = require("http");
+const WebSocket = require("ws");
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-    'http://192.168.1.119:5173'
-  ],
-  credentials: true
-}));
+app.use(cors());
 app.use(express.json());
 
-/* ================== STORES ================== */
-const robots = new Map();        // robotId → robot object
-const missionQueues = new Map(); // robotId → missions[]
-const missionLoops = new Map();  // robotId → loop info
+/* ===================== STORES ===================== */
+const robots = new Map();          // robotId -> robot
+const missionQueues = new Map();   // robotId -> [missions]
+const missionLoops = new Map();    // robotId -> { mission, remaining }
 
-/* ================== HELPERS ================== */
+/* ===================== HELPERS ===================== */
+function safeSend(ws, data) {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(data));
+  }
+}
+
 function createRobot(ws, ip) {
   return {
     ws,
     ip,
-    status: 'idle',
+    status: "idle",
     lastHeartbeat: Date.now(),
     currentMission: null,
-    completedMissions: 0
   };
 }
 
-function safeSend(ws, payload) {
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(payload));
-  }
-}
-
-/* ================== MISSION DISPATCH ================== */
+/* ===================== DISPATCH ===================== */
 function dispatchNextMission(robotId) {
   const robot = robots.get(robotId);
   const queue = missionQueues.get(robotId);
   if (!robot || !queue || queue.length === 0) {
-    robot.status = 'idle';
+    robot.status = "idle";
     robot.currentMission = null;
     return;
   }
 
   const mission = queue.shift();
-  robot.status = 'executing';
+  robot.status = "executing";
   robot.currentMission = mission;
 
-  // handle looping correctly
-  if (mission.loop && mission.loop !== 1) {
-    missionLoops.set(robotId, {
-      mission,
-      remaining: mission.loop < 0 ? Infinity : Math.max(1, mission.loop)
-
-    });
-  } else {
-    missionLoops.delete(robotId);
+  // 🔁 Initialize loop tracking ONLY ONCE
+  if (!missionLoops.has(robotId)) {
+    if (mission.loop === -1) {
+      missionLoops.set(robotId, {
+        mission,
+        remaining: Infinity,
+      });
+    } else if (mission.loop > 1) {
+      missionLoops.set(robotId, {
+        mission,
+        remaining: mission.loop - 1, // 🔥 CRITICAL FIX
+      });
+    }
   }
 
   safeSend(robot.ws, {
-    type: 'mission_assignment',
+    type: "mission_assignment",
     missionId: mission.id,
     missionName: mission.name,
-    tasks: mission.tasks
+    tasks: mission.tasks,
   });
 
-  console.log(`▶️ ${robotId} started "${mission.name}"`);
+  console.log(`▶️ ${robotId} executing "${mission.name}"`);
 }
 
-/* ================== LOOP HANDLER ================== */
-function handleMissionLoop(robotId) {
+/* ===================== LOOP HANDLER ===================== */
+function handleMissionCompletion(robotId) {
   const loopInfo = missionLoops.get(robotId);
   const queue = missionQueues.get(robotId);
+
   if (!loopInfo) return;
 
   if (loopInfo.remaining !== Infinity) {
     loopInfo.remaining--;
   }
 
-  if (loopInfo.remaining > 0 || loopInfo.remaining === Infinity) {
-    queue.push(loopInfo.mission);
-    console.log(`🔁 Looping mission "${loopInfo.mission.name}"`);
+  console.log(`🔁 Remaining loops: ${loopInfo.remaining}`);
+
+  // ✅ FIXED CONDITION
+  if (loopInfo.remaining >= 0 || loopInfo.remaining === Infinity) {
+    queue.push({
+      ...loopInfo.mission,
+      loop: 1, // prevent re-init
+    });
   } else {
     missionLoops.delete(robotId);
-    console.log(`✅ Loop finished`);
+    console.log("✅ Loop finished completely");
   }
 }
 
 
-/* ================== WEBSOCKET ================== */
-wss.on('connection', (ws, req) => {
+/* ===================== WEBSOCKET ===================== */
+wss.on("connection", (ws, req) => {
   const robotId = `hiwonder-${Date.now().toString().slice(-6)}`;
+
   robots.set(robotId, createRobot(ws, req.socket.remoteAddress));
   missionQueues.set(robotId, []);
 
-  console.log(`🤖 Connected: ${robotId} from ${req.socket.remoteAddress}`);
-  safeSend(ws, { type: 'welcome', robotId });
+  console.log(`🤖 Robot connected: ${robotId}`);
+  safeSend(ws, { type: "welcome", robotId });
 
-  ws.on('message', data => {
+  ws.on("message", (data) => {
     let msg;
-    try { msg = JSON.parse(data.toString()); } catch { return; }
+    try {
+      msg = JSON.parse(data.toString());
+    } catch {
+      return;
+    }
+
     const robot = robots.get(robotId);
     if (!robot) return;
 
     robot.lastHeartbeat = Date.now();
 
     switch (msg.type) {
-      case 'heartbeat':
+      case "heartbeat":
         robot.status = msg.status || robot.status;
         break;
-      case 'mission_completed':
+
+      case "mission_completed":
         console.log(`✅ ${robotId} completed mission`);
-        robot.completedMissions++;
-        robot.status = 'idle';
+        robot.status = "idle";
         robot.currentMission = null;
-        handleMissionLoop(robotId);
+
+        handleMissionCompletion(robotId);
         setTimeout(() => dispatchNextMission(robotId), 200);
         break;
-      case 'error':
-        robot.status = 'error';
-        console.error(`❌ ${robotId}`, msg.error);
+
+      case "error":
+        console.error(`❌ Robot error:`, msg.error);
         break;
     }
   });
 
-  ws.on('close', () => {
+  ws.on("close", () => {
     robots.delete(robotId);
     missionQueues.delete(robotId);
     missionLoops.delete(robotId);
-    console.log(`🔌 Disconnected: ${robotId}`);
+    console.log(`🔌 Robot disconnected: ${robotId}`);
   });
 });
 
-/* ================== HEARTBEAT CHECK ================== */
-setInterval(() => {
-  const now = Date.now();
-  for (const [id, robot] of robots) {
-    if (now - robot.lastHeartbeat > 15000) {
-      console.log(`💀 Robot ${id} heartbeat timeout`);
-      if (robot.ws.readyState === WebSocket.OPEN) robot.ws.close();
-      robots.delete(id);
-      missionQueues.delete(id);
-      missionLoops.delete(id);
-    }
-  }
-}, 5000);
-
-/* ================== REST API ================== */
-app.get('/api/robots', (_, res) => {
+/* ===================== REST API ===================== */
+app.get("/api/robots", (_, res) => {
   res.json({
     success: true,
     robots: [...robots.entries()].map(([id, r]) => ({
       id,
       status: r.status,
       currentMission: r.currentMission,
-      completedMissions: r.completedMissions
-    }))
+    })),
   });
 });
 
-app.post('/api/assign-mission', (req, res) => {
+app.post("/api/assign-mission", (req, res) => {
   const { robotId, mission } = req.body;
   const robot = robots.get(robotId);
   if (!robot || !mission) return res.status(400).json({ success: false });
 
   const queue = missionQueues.get(robotId);
-  if (robot.status === 'idle') {
+
+  // Reset old loop state
+  missionLoops.delete(robotId);
+
+  if (robot.status === "idle") {
     queue.unshift(mission);
     dispatchNextMission(robotId);
   } else {
@@ -628,23 +626,38 @@ app.post('/api/assign-mission', (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/api/robot/:id/cancel', (req, res) => {
+app.post("/api/robot/:id/cancel", (req, res) => {
   const robotId = req.params.id;
+
   missionQueues.set(robotId, []);
   missionLoops.delete(robotId);
 
   const robot = robots.get(robotId);
   if (robot) {
-    robot.status = 'idle';
+    robot.status = "idle";
     robot.currentMission = null;
-    safeSend(robot.ws, { type: 'command', command: 'cancel' });
+    safeSend(robot.ws, { type: "command", command: "cancel" });
   }
 
   res.json({ success: true });
 });
 
-/* ================== START SERVER ================== */
-const PORT = process.env.PORT || 3002;
+/* ===================== HEARTBEAT ===================== */
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, robot] of robots) {
+    if (now - robot.lastHeartbeat > 15000) {
+      console.log(`💀 ${id} heartbeat timeout`);
+      robot.ws.close();
+      robots.delete(id);
+      missionQueues.delete(id);
+      missionLoops.delete(id);
+    }
+  }
+}, 5000);
+
+/* ===================== START ===================== */
+const PORT = 3002;
 server.listen(PORT, () => {
   console.log(`🚀 HiWonder Server running on http://localhost:${PORT}`);
 });
