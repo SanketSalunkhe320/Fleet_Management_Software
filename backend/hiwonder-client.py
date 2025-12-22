@@ -138,12 +138,12 @@
 #     main()
 
 
-
 import websocket
 import threading
 import json
 import time
 import math
+
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
@@ -151,119 +151,191 @@ from nav_msgs.msg import Odometry
 
 SERVER_URL = "ws://localhost:3002"
 
+
+# ============================ ROBOT NODE ============================
 class RobotMissionExecutor(Node):
+
     def __init__(self):
         super().__init__('mission_executor')
+
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
-        self.current_yaw = 0.0
-        self.current_mission = None
+
+        self.current_yaw = None
         self.stop_requested = False
 
+    # -------------------- ODOM --------------------
     def odom_callback(self, msg):
-        self.current_yaw = self.quaternion_to_yaw(msg.pose.pose.orientation)
+        q = msg.pose.pose.orientation
+        self.current_yaw = self.quaternion_to_yaw(q)
 
-    def quaternion_to_yaw(self, q):
+    @staticmethod
+    def quaternion_to_yaw(q):
         siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
-        cosy_cosp = 1.0 - 2.0 * (q.y ** 2 + q.z ** 2)
+        cosy_cosp = 1.0 - 2.0 * (q.y*q.y + q.z*q.z)
         return math.atan2(siny_cosp, cosy_cosp)
 
+    # -------------------- TASK EXECUTION --------------------
     def execute_task(self, task):
         self.stop_requested = False
+
         if task['type'] in ['MoveForward', 'MoveReverse']:
-            self._execute_linear(task)
+            self.execute_linear(task)
+
         elif task['type'] in ['RotateClockwise', 'RotateAntiClockwise']:
-            self._execute_rotation(task)
+            self.execute_rotation(task)
+
         elif task['type'] == 'Wait':
             time.sleep(task['config']['duration'] / 1000.0)
 
-        self.cmd_pub.publish(Twist())  # stop
-        time.sleep(0.05)
+        self.stop_robot()
         return True
 
-    def _execute_linear(self, task):
+    # -------------------- LINEAR --------------------
+    def execute_linear(self, task):
         speed = float(task['config']['speed'])
         distance = float(task['config']['distance'])
+
         duration = abs(distance / speed)
         twist = Twist()
         twist.linear.x = speed if task['type'] == 'MoveForward' else -speed
+
         start = time.time()
         while time.time() - start < duration and not self.stop_requested:
             self.cmd_pub.publish(twist)
             time.sleep(0.05)
 
-    def _execute_rotation(self, task):
-        angle = math.radians(task['config']['angle'])
-        clockwise = task['type'] == 'RotateClockwise'
+    # -------------------- ROTATION (CORRECT & STABLE) --------------------
+    def execute_rotation(self, task):
+        while self.current_yaw is None:
+            time.sleep(0.01)  # wait for odom
+
+        angle_rad = math.radians(float(task['config']['angle']))
+
+        start_yaw = self.current_yaw
+
+        if task['type'] == 'RotateClockwise':
+            target_yaw = start_yaw - angle_rad
+        else:
+            target_yaw = start_yaw + angle_rad
+
+        target_yaw = self.normalize_angle(target_yaw)
+
         twist = Twist()
-        twist.angular.z = -0.5 if clockwise else 0.5
-        rotated = 0.0
-        prev_yaw = self.current_yaw
-        while rotated < angle and not self.stop_requested:
+
+        while not self.stop_requested:
+            error = self.normalize_angle(target_yaw - self.current_yaw)
+
+            # 🎯 STOP condition (tight)
+            if abs(error) < math.radians(0.5):
+                break
+
+            # 🧠 Proportional control
+            angular_speed = max(0.05, min(0.4, abs(error)))
+            twist.angular.z = angular_speed * math.copysign(1.0, error)
+
             self.cmd_pub.publish(twist)
             time.sleep(0.05)
-            delta = self._normalize_angle(self.current_yaw - prev_yaw)
-            rotated += abs(delta)
-            prev_yaw = self.current_yaw
-        self.cmd_pub.publish(Twist())
 
+        self.stop_robot()
+
+    # -------------------- UTILS --------------------
     @staticmethod
-    def _normalize_angle(angle):
-        while angle > math.pi: angle -= 2*math.pi
-        while angle < -math.pi: angle += 2*math.pi
+    def normalize_angle(angle):
+        while angle > math.pi:
+            angle -= 2 * math.pi
+        while angle < -math.pi:
+            angle += 2 * math.pi
         return angle
 
+    def stop_robot(self):
+        self.cmd_pub.publish(Twist())
+        time.sleep(0.05)
+
+    # -------------------- MISSION --------------------
     def execute_mission(self, mission, ws):
-       for task in mission['tasks']:
-        if self.stop_requested:
-            break
-        success = self.execute_task(task)
+        for task in mission['tasks']:
+            if self.stop_requested:
+                break
+
+            success = self.execute_task(task)
+
+            ws.send(json.dumps({
+                "type": "task_completed",
+                "taskId": task["id"],
+                "success": success
+            }))
+
         ws.send(json.dumps({
-            "type": "task_completed",
-            "taskId": task["id"],
-            "success": success
+            "type": "mission_completed",
+            "missionId": mission["id"]
         }))
 
-       ws.send(json.dumps({
-        "type": "mission_completed",
-        "missionId": mission["id"]
-    }))
 
-       self.current_mission = None
-
-
+# ============================ WEBSOCKET ============================
 executor_node = None
 robot_id = None
+
 
 def on_message(ws, message):
     global robot_id
     data = json.loads(message)
+
     if data['type'] == 'welcome':
         robot_id = data['robotId']
         print(f"✅ Connected as {robot_id}")
+
     elif data['type'] == 'mission_assignment':
-        mission = {"id": data['missionId'], "tasks": data['tasks'], "loop": data.get("loop", 1)}
-        threading.Thread(target=executor_node.execute_mission, args=(mission, ws), daemon=True).start()
+        mission = {
+            "id": data['missionId'],
+            "tasks": data['tasks']
+        }
+
+        threading.Thread(
+            target=executor_node.execute_mission,
+            args=(mission, ws),
+            daemon=True
+        ).start()
+
     elif data['type'] == 'command' and data['command'] in ['stop', 'cancel']:
         executor_node.stop_requested = True
-        executor_node.cmd_pub.publish(Twist())
+        executor_node.stop_robot()
+
 
 def on_open(ws):
     print("🔗 WebSocket connected")
+
     def heartbeat():
         while True:
             if robot_id:
-                ws.send(json.dumps({"type": "heartbeat", "status": "idle"}))
+                ws.send(json.dumps({
+                    "type": "heartbeat",
+                    "status": "idle"
+                }))
             time.sleep(5)
+
     threading.Thread(target=heartbeat, daemon=True).start()
 
+
+# ============================ MAIN ============================
 def main():
     global executor_node
+
     rclpy.init()
     executor_node = RobotMissionExecutor()
-    threading.Thread(target=lambda: rclpy.spin(executor_node), daemon=True).start()
-    ws = websocket.WebSocketApp(SERVER_URL, on_message=on_message, on_open=on_open)
+
+    threading.Thread(
+        target=lambda: rclpy.spin(executor_node),
+        daemon=True
+    ).start()
+
+    ws = websocket.WebSocketApp(
+        SERVER_URL,
+        on_message=on_message,
+        on_open=on_open
+    )
     ws.run_forever()
+
 
 if __name__ == "__main__":
     main()
