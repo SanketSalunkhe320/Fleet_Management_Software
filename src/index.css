@@ -3,10 +3,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 
+  TEXT SELECTION RULES - Revised approach
+  Instead of blocking everything, allow text rendering while preventing selection
+*/
 
-
-/* Prevent text selection throughout the application */
-* {
+/* Prevent text selection on most interactive/non-text elements */
+body, div, main, header, footer, section, article, nav, aside, 
+button, canvas, svg, img, video, iframe, 
+table, tr, td, th,
+.form-container, .card, .panel, .modal {
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;
@@ -15,7 +21,28 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Allow text selection in input fields and textareas */
+/* ALLOW proper text rendering and selection for text elements */
+/* This ensures fonts render correctly while still preventing casual text selection */
+p, h1, h2, h3, h4, h5, h6, span, a, li, 
+label, small, strong, em, b, i, 
+.t, .text, .label, .title, .heading,
+.font-bold, .font-semibold, .font-medium,
+[class*="font-"]:not(input):not(textarea):not(select) {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
+  user-select: text;
+}
+
+/* Specifically ensure sidebar text renders properly */
+aside, aside * {
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+  -ms-user-select: text !important;
+  user-select: text !important;
+}
+
+/* Allow full text selection in form fields */
 input, textarea, select, [contenteditable="true"] {
   -webkit-user-select: text;
   -moz-user-select: text;
@@ -23,7 +50,28 @@ input, textarea, select, [contenteditable="true"] {
   user-select: text;
 }
 
+/* Font rendering optimizations for better text display */
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
 
+/* Ensure bold text renders properly across all languages */
+.font-bold, b, strong {
+  font-weight: 700 !important;
+}
+
+/* Specific fix for Devanagari and other complex scripts */
+.devanagari-text, 
+[lang="hi"], [lang="mr"],
+:lang(hi), :lang(mr) {
+  font-family: 'Segoe UI', 'Nirmala UI', 'Mangal', 'Arial Unicode MS', 'Roboto', sans-serif !important;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Light mode variables */
 :root {
   /* Light mode defaults */
   --status-bg-start: #1c91dfff;
@@ -93,6 +141,7 @@ input, textarea, select, [contenteditable="true"] {
   --mobile-header-border: #dee2e6;
 }
 
+/* Dark mode variables */
 .dark {
   /* Status Bar Dark Mode */
   --status-bg-start: #1a1f2e;
@@ -162,6 +211,7 @@ input, textarea, select, [contenteditable="true"] {
   --mobile-header-border: #4b5563;
 }
 
+/* Animations */
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.7; }

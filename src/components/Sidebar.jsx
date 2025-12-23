@@ -51,6 +51,9 @@
 //   );
 // }
 
+
+
+
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
@@ -66,7 +69,7 @@ import { useLanguage } from "../context/LanguageContext";
 
 export default function Sidebar() {
   const location = useLocation();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
 
   const links = [
     { to: "/", label: t("dashboard"), icon: FiHome },
@@ -78,6 +81,9 @@ export default function Sidebar() {
     { to: "/settings", label: t("settings"), icon: FiSettings },
   ];
 
+  // Check if current language uses Devanagari script
+  const isDevanagariScript = language === "mr" || language === "hi";
+
   return (
     <aside className="hidden lg:block w-64 bg-gradient-to-b from-sky-700 to-sky-800 text-white p-7 space-y-6 opacity-90 select-none">
       <nav className="space-y-4">
@@ -87,12 +93,26 @@ export default function Sidebar() {
             to={to}
             className={`flex items-center gap-3 py-2 px-3 rounded-md transition-all duration-200 ${
               location.pathname === to
-                ? "bg-sky-600 text-white font-semibold shadow"
+                ? "bg-sky-600 text-white shadow"
                 : "text-gray-200 hover:bg-sky-500"
             }`}
           >
             <Icon className="text-lg select-none" />
-            <span className="font-bold">{label}</span>
+            <span 
+              className="font-bold"
+              style={
+                isDevanagariScript 
+                  ? {
+                      fontWeight: '700',
+                      fontFamily: "'Nirmala UI', 'Mangal', 'Arial Unicode MS', 'Segoe UI', sans-serif",
+                      WebkitFontSmoothing: 'antialiased',
+                      MozOsxFontSmoothing: 'grayscale'
+                    }
+                  : { fontWeight: '700' }
+              }
+            >
+              {label}
+            </span>
           </Link>
         ))}
       </nav>
