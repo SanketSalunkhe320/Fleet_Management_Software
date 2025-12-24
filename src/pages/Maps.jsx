@@ -6155,42 +6155,150 @@ free_thresh: 0.25`;
   };
 
   // --- Save / Load / Clear ---
-  const handleSaveJSON = () => {
-    const payload = {
-      mapName,
-      nodes,
-      arrows,
-      zones,
-      mapParams: mapParamsRef.current,
-      timestamp: Date.now(),
+ const handleSaveJSON = () => {
+  // Create a mapping from old node IDs to new sequential IDs starting from 1
+  const nodeIdMap = {};
+  
+  // Reset node IDs to be sequential starting from 1
+  const nodesToExport = nodes.map((node, index) => {
+    const newId = index + 1;
+    nodeIdMap[node.id] = newId; // Map old ID to new sequential ID
+    
+    return {
+      id: newId,
+      type: node.type,
+      label: node.label ? node.label.replace(/Node \d+/, `Node ${newId}`) : `Node ${newId}`,
+      rosX: node.rosX,
+      rosY: node.rosY,
     };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${mapName || "map"}_editor.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+  });
+
+  // Create a mapping from old arrow IDs to new sequential IDs starting from 1
+  const arrowIdMap = {};
+  
+  // Reset arrow IDs to be sequential and update node references
+  const arrowsToExport = arrows.map((arrow, index) => {
+    const newId = index + 1;
+    arrowIdMap[arrow.id] = newId;
+    
+    return {
+      id: newId,
+      fromId: nodeIdMap[arrow.fromId] || arrow.fromId,
+      toId: nodeIdMap[arrow.toId] || arrow.toId,
+      points: arrow.points?.map(point => ({
+        x: point.x,
+        y: point.y,
+      })) || []
+    };
+  });
+
+  // Create a mapping from old zone IDs to new sequential IDs starting from 1
+  const zoneIdMap = {};
+  
+  // Reset zone IDs to be sequential
+  const zonesToExport = zones.map((zone, index) => {
+    const newId = index + 1;
+    zoneIdMap[zone.id] = newId;
+    
+    return {
+      id: newId,
+      name: zone.name,
+      type: zone.type,
+      points: zone.points.map(point => ({
+        rosX: point.rosX,
+        rosY: point.rosY,
+      })),
+    };
+  });
+
+  const payload = {
+    mapName,
+    nodes: nodesToExport,
+    arrows: arrowsToExport,
+    zones: zonesToExport,
+    mapParams: mapParamsRef.current,
+    timestamp: Date.now(),
+    metadata: {
+      version: "1.0",
+      nodeCount: nodes.length,
+      arrowCount: arrows.length,
+      zoneCount: zones.length,
+      idMappings: {
+        // Optional: include mappings for debugging/reference
+        nodes: nodeIdMap,
+        arrows: arrowIdMap,
+        zones: zoneIdMap,
+      }
+    }
   };
+  
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${mapName || "map"}_editor.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
 
   const handleUploadJSON = (file) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const obj = JSON.parse(ev.target.result);
-        if (obj.nodes) setNodes(obj.nodes);
-        if (obj.arrows) setArrows(obj.arrows);
-        if (obj.zones) setZones(obj.zones);
-        if (obj.mapName) setMapName(obj.mapName);
-        if (!mapParamsRef.current && obj.mapParams) mapParamsRef.current = obj.mapParams;
-      } catch (err) {
-        console.error("Invalid JSON", err);
-        alert("Invalid JSON file");
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const obj = JSON.parse(ev.target.result);
+      
+      if (obj.mapParams) {
+        mapParamsRef.current = obj.mapParams;
       }
-    };
-    reader.readAsText(file);
+
+      // Recalculate canvas coordinates when loading
+      if (obj.nodes) {
+        const nodesWithCanvas = obj.nodes.map(node => {
+          const canvasCoords = rosToCanvasCoords(node.rosX, node.rosY);
+          return {
+            ...node,
+            canvasX: canvasCoords.x,
+            canvasY: canvasCoords.y
+          };
+        });
+        setNodes(nodesWithCanvas);
+      }
+
+      if (obj.arrows) {
+        setArrows(obj.arrows);
+      }
+
+      if (obj.zones) {
+        const zonesWithCanvas = obj.zones.map(zone => {
+          const pointsWithCanvas = zone.points.map(point => {
+            const canvasCoords = rosToCanvasCoords(point.rosX, point.rosY);
+            return {
+              ...point,
+              canvasX: canvasCoords.x,
+              canvasY: canvasCoords.y
+            };
+          });
+          return {
+            ...zone,
+            points: pointsWithCanvas
+          };
+        });
+        setZones(zonesWithCanvas);
+      }
+
+      if (obj.mapName) {
+        setMapName(obj.mapName);
+      }
+
+    } catch (err) {
+      console.error("Invalid JSON", err);
+      alert("Invalid JSON file");
+    }
   };
+  reader.readAsText(file);
+};
 
   const handleClearAll = () => {
     if (window.confirm("Are you sure you want to clear ALL nodes, arrows, and zones?")) {

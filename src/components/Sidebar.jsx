@@ -64,6 +64,7 @@ import {
   FiBarChart2,
   FiSettings,
   FiMap,
+  FiMapPin,
 } from "react-icons/fi";
 import { useLanguage } from "../context/LanguageContext";
 
@@ -76,9 +77,13 @@ export default function Sidebar() {
     { to: "/maps", label: t("maps"), icon: FiMap },
     { to: "/realtime", label: t("realtime_visualisation"), icon: FiActivity },
     { to: "/tasks", label: t("task_allocation"), icon: FiClipboard },
+    { to: "/mapview", label: t("mapview"), icon: FiMapPin },
+
     { to: "/health", label: t("health_check"), icon: FiHeart },
     { to: "/reports", label: t("reports"), icon: FiBarChart2 },
+
     { to: "/settings", label: t("settings"), icon: FiSettings },
+
   ];
 
   // Check if current language uses Devanagari script

@@ -324,6 +324,7 @@ import Settings from "./pages/Settings";
 import Animation from "./pages/Animation";
 import LoginForm from "./pages/LoginForm";
 import SignupForm from "./pages/SignupForm";
+import Mapview from "./pages/Mapview";
 
 // Layout
 import DashboardLayout from "./components/DashboardLayout";
@@ -443,6 +444,23 @@ export default function App() {
                 setDarkMode={setDarkMode}
               >
                 <Settings
+                  darkMode={darkMode}
+                  setDarkMode={setDarkMode}
+                />
+              </DashboardLayout>
+            </ProtectedRoute>
+          }
+        />
+
+         <Route
+          path="/mapview"
+          element={
+            <ProtectedRoute>
+              <DashboardLayout
+                darkMode={darkMode}
+                setDarkMode={setDarkMode}
+              >
+                <Mapview
                   darkMode={darkMode}
                   setDarkMode={setDarkMode}
                 />
